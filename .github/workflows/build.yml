@@ -1,0 +1,80 @@
+name: Build and package
+
+on:
+  push:
+    branches: [master, main, 'feat/**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Install Linux packaging and display tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y fakeroot xvfb libgtk-3-0
+      - name: Install Windows packaging tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'wix.zip'
+          $tools = Join-Path $env:RUNNER_TEMP 'wix'
+          Invoke-WebRequest 'https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip' -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne '6AC824E1642D6F7277D0ED7EA09411A508F6116BA6FAE0AA5F2C7DAA2FF43D31') { throw 'WiX checksum mismatch' }
+          Expand-Archive $zip $tools
+          $tools | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Build and test (Linux)
+        if: runner.os == 'Linux'
+        run: sh mvnw -B -ntp clean verify
+      - name: Build and test (Windows)
+        if: runner.os == 'Windows'
+        run: .\mvnw.cmd -B -ntp clean verify
+      - name: Exercise desktop UI (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a -s '-screen 0 1920x1080x24' java --enable-native-access=ALL-UNNAMED -Dpapyrus.smoke.skipWindowManager=true -cp 'target/test-classes:target/classes:target/lib/*' papyrus.UiSmoke
+      - name: Build installers and portable downloads
+        run: python scripts/package.py --skip-build
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: papyrus-${{ runner.os }}-x64
+          path: dist/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always() && runner.os == 'Linux'
+        with:
+          name: desktop-screenshots
+          path: target/screenshots/*
+
+  draft-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: papyrus-*
+          path: release-assets
+          merge-multiple: true
+      - name: Prepare a draft for review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" release-assets/* --verify-tag --draft --title "Papyrus $RELEASE_TAG" --notes-file RELEASE_NOTES.md
