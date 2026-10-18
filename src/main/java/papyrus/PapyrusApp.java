@@ -584,7 +584,12 @@ public final class PapyrusApp extends Application {
         dialog.getDialogPane().getButtonTypes().add(new ButtonType(t(save ? "save" : "close"), ButtonBar.ButtonData.OK_DONE));
         if (save) dialog.getDialogPane().getButtonTypes().add(new ButtonType(t("cancel"), ButtonBar.ButtonData.CANCEL_CLOSE));
         if (save) dialog.getDialogPane().lookupButton(dialog.getDialogPane().getButtonTypes().getFirst()).getStyleClass().add("primary");
-        Runnable setIcon = () -> { if (dialog.getDialogPane().getScene() != null && dialog.getDialogPane().getScene().getWindow() instanceof Stage window) window.getIcons().setAll(windowIcon(icon)); };
+        Runnable setIcon = () -> {
+            if (dialog.getDialogPane().getScene() != null && dialog.getDialogPane().getScene().getWindow() instanceof Stage window) {
+                javafx.beans.binding.Bindings.unbindContent(window.getIcons(), stage.getIcons());
+                window.getIcons().setAll(windowIcon(icon));
+            }
+        };
         dialog.setOnShowing(event -> setIcon.run()); dialog.setOnShown(event -> setIcon.run());
         setIcon.run();
         apply(dialog.getDialogPane()); return dialog;
@@ -629,14 +634,7 @@ public final class PapyrusApp extends Application {
     }
 
     private Image windowIcon(String page) {
-        return windowIcons.computeIfAbsent(page, key -> {
-            StackPane graphic = (StackPane) icon(key);
-            SVGPath path = (SVGPath) graphic.getChildren().getFirst();
-            path.setStroke(javafx.scene.paint.Color.WHITE); path.setStrokeWidth(1.8);
-            path.setFill(javafx.scene.paint.Color.TRANSPARENT); path.setScaleX(1.8); path.setScaleY(1.8);
-            StackPane tile = new StackPane(graphic); tile.setStyle("-fx-background-color: #21765b; -fx-background-radius: 12;");
-            tile.resize(64, 64); tile.layout();
-            return tile.snapshot(new SnapshotParameters(), new WritableImage(64, 64));
-        });
+        return windowIcons.computeIfAbsent(page, key -> new Image(Objects.requireNonNull(
+                getClass().getResourceAsStream("/papyrus/icons/" + key + ".png"))));
     }
 }

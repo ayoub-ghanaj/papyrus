@@ -126,6 +126,13 @@ public final class UiSmoke {
                 add(() -> { dialog = app.editor(entity, null); dialog.show(); });
                 add(() -> {
                     screenshot("form-" + entity.name().toLowerCase(Locale.ROOT) + "-" + language, dialog.getDialogPane());
+                    var window = (Stage) dialog.getDialogPane().getScene().getWindow();
+                    check(!window.getIcons().isEmpty() && window.getIcons().getFirst().getWidth() == 128, "Dialog has a complete native icon asset");
+                    check(window.getIcons().getFirst().getPixelReader().getColor(64, 64).getOpacity() > 0.9, "Dialog icon is opaque at its center");
+                    if (entity == Store.Entity.STUDENTS && language.equals("en")) {
+                        var image = new javafx.scene.robot.Robot().getScreenCapture(null, window.getX(), window.getY(), window.getWidth(), window.getHeight(), true);
+                        saveImage("native-student-window-en", image);
+                    }
                     dialog.close();
                 });
             }
@@ -178,6 +185,11 @@ public final class UiSmoke {
         try {
             root.applyCss(); ((javafx.scene.Parent) root).layout();
             WritableImage image = root.snapshot(null, null);
+            saveImage(name, image);
+        } catch (Exception ex) { throw new RuntimeException(ex); }
+    }
+    private static void saveImage(String name, WritableImage image) {
+        try {
             BufferedImage png = new BufferedImage((int) image.getWidth(), (int) image.getHeight(), BufferedImage.TYPE_INT_ARGB);
             for (int y = 0; y < png.getHeight(); y++) for (int x = 0; x < png.getWidth(); x++) png.setRGB(x, y, image.getPixelReader().getArgb(x, y));
             ImageIO.write(png, "png", SCREENSHOTS.resolve(name + ".png").toFile());
