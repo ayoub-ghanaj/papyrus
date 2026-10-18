@@ -1,0 +1,16 @@
+/target/
+/.idea/
+*.iml
+/out/
+/dist/
+/database/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.log
+.DS_Store
+/local-data/
+/local-tools/
+__pycache__/
+*.pyc
