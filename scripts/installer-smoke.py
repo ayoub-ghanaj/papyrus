@@ -44,6 +44,8 @@ def main():
         java = installed / 'runtime/bin/java.exe'
         app = installed / 'app'
     else:
+        # Hosted runners lack the XDG menu directories present on desktop installations.
+        run('sudo', 'install', '-d', '-m', '0755', '/usr/share/desktop-directories', '/usr/share/applications')
         installed = Path('/opt/papyrus')
         def install(file):
             run('sudo', 'apt-get', 'install', '-y', file)
