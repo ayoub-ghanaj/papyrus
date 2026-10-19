@@ -1,8 +1,6 @@
 package papyrus;
 
 import javafx.application.Platform;
-import javafx.animation.PauseTransition;
-import javafx.util.Duration;
 import javafx.stage.*;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
@@ -74,6 +72,13 @@ public final class UiReliabilitySmoke {
                 await(()->pane("current-password")!=null,"Password dialog opened");
                 steps.add(()->{toolPane=pane("current-password");((PasswordField)toolPane.lookup("#current-password")).setText("review-password");((PasswordField)toolPane.lookup("#new-password")).setText("changed-password");((PasswordField)toolPane.lookup("#confirm-new-password")).setText("changed-password");((Button)toolPane.lookupButton(toolPane.getButtonTypes().getFirst())).fire();});
                 await(()->pane("current-password")==null,"Password form saved");
+                await(()->pane("notification")!=null,"Password confirmation opens without blocking");
+                steps.add(()->{
+                    DialogPane notice=pane("notification");notice.applyCss();notice.layout();
+                    check(notice.getContentText().equals(app.t("passwordChanged")),"Confirmation contains translated text");
+                    check(notice.lookupButton(notice.getButtonTypes().getFirst()).getBoundsInParent().getHeight()>0,"Confirmation close button renders");
+                    UiSmoke.screenshot("password-changed-"+System.getProperty("os.name").replace(' ','-'),notice);
+                });
                 steps.add(()->{
                     for(Window window:List.copyOf(Window.getWindows())) if(window!=stage&&window.isShowing()&&window.getScene()!=null&&window.getScene().getRoot() instanceof DialogPane pane) ((Button)pane.lookupButton(pane.getButtonTypes().getFirst())).fire();
                 });
@@ -97,6 +102,6 @@ public final class UiReliabilitySmoke {
     static void await(BooleanSupplier condition,String message) {
         steps.add(new Runnable(){long deadline;public void run(){if(deadline==0)deadline=System.nanoTime()+15_000_000_000L;UiTestSupport.step=message;if(condition.getAsBoolean()){UiTestSupport.progress(message);return;}check(System.nanoTime()<deadline,message);steps.addFirst(this);}});
     }
-    static void advance(){try{if(steps.isEmpty())return;steps.remove().run();PauseTransition wait=new PauseTransition(Duration.millis(200));wait.setOnFinished(e->advance());wait.play();}catch(Throwable e){e.printStackTrace();System.exit(1);}}
+    static void advance(){try{if(steps.isEmpty())return;steps.remove().run();UiTestSupport.next(UiReliabilitySmoke::advance,200);}catch(Throwable e){e.printStackTrace();System.exit(1);}}
     static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
 }

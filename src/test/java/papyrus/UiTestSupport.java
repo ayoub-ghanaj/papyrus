@@ -2,6 +2,13 @@ package papyrus;
 
 /** Makes asynchronous desktop failures fail CI instead of leaving a dialog or stalled pulse running. */
 final class UiTestSupport {
+    private static final java.util.concurrent.ScheduledExecutorService ticks = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(task -> {
+        Thread thread = new Thread(task, "desktop-test-steps"); thread.setDaemon(true); return thread;
+    });
+    static void next(Runnable step, int delayMillis) {
+        // Keep test deadlines independent of JavaFX animation pulses.
+        ticks.schedule(() -> javafx.application.Platform.runLater(step), delayMillis, java.util.concurrent.TimeUnit.MILLISECONDS);
+    }
     static volatile String step = "startup";
     static void start() {
         Thread.setDefaultUncaughtExceptionHandler((thread, error) -> {

@@ -1,13 +1,11 @@
 package papyrus;
 
-import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.image.WritableImage;
 import javafx.stage.Stage;
-import javafx.util.Duration;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.nio.file.*;
@@ -192,7 +190,7 @@ public final class UiSmoke {
         Runnable next = STEPS.poll(); if (next == null) return;
         try {
             next.run();
-            PauseTransition wait = new PauseTransition(Duration.millis(180)); wait.setOnFinished(e -> advance()); wait.play();
+            UiTestSupport.next(UiSmoke::advance, 180);
         } catch (Throwable error) { fail(error); }
     }
     private static void text(String id, String value) { ((TextInputControl) stage.getScene().lookup("#" + id)).setText(value); }
@@ -207,7 +205,7 @@ public final class UiSmoke {
     private static void screenshot(String name) {
         screenshot(name, stage.getScene().getRoot());
     }
-    private static void screenshot(String name, Node root) {
+    static void screenshot(String name, Node root) {
         try {
             UiTestSupport.progress("screenshot " + name);
             root.applyCss(); ((javafx.scene.Parent) root).layout();
@@ -217,6 +215,7 @@ public final class UiSmoke {
     }
     private static void saveImage(String name, WritableImage image) {
         try {
+            Files.createDirectories(SCREENSHOTS);
             BufferedImage png = new BufferedImage((int) image.getWidth(), (int) image.getHeight(), BufferedImage.TYPE_INT_ARGB);
             for (int y = 0; y < png.getHeight(); y++) for (int x = 0; x < png.getWidth(); x++) png.setRGB(x, y, image.getPixelReader().getArgb(x, y));
             ImageIO.write(png, "png", SCREENSHOTS.resolve(name + ".png").toFile());

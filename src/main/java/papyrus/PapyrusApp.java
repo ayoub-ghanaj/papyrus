@@ -525,12 +525,12 @@ public final class PapyrusApp extends Application {
     }
     void inform(String title, String details) {
         Alert alert = new Alert(Alert.AlertType.INFORMATION, details.isBlank() ? t(title) : details, new ButtonType(t("close"), ButtonBar.ButtonData.OK_DONE));
-        alert.initOwner(stage); alert.setTitle(t(title)); alert.setHeaderText(t(title)); apply(alert.getDialogPane()); alert.showAndWait();
+        alert.initOwner(stage); alert.setTitle(t(title)); alert.setHeaderText(t(title)); alert.getDialogPane().setId("notification"); apply(alert.getDialogPane()); alert.show();
     }
     void showError(Exception ex) {
         if (store != null && store.user() == null && !(ex instanceof IOException)) showLogin();
         Alert alert = new Alert(Alert.AlertType.ERROR, message(ex), new ButtonType(t("ok"), ButtonBar.ButtonData.OK_DONE));
-        alert.initOwner(stage); alert.setTitle(t("error")); alert.setHeaderText(null); apply(alert.getDialogPane()); alert.showAndWait();
+        alert.initOwner(stage); alert.setTitle(t("error")); alert.setHeaderText(null); apply(alert.getDialogPane()); alert.show();
     }
 
     Node icon(String name) {

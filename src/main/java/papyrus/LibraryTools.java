@@ -116,10 +116,10 @@ final class LibraryTools {
         page.getChildren().addAll(new Label("Papyrus · " + app.t("overdue")), new Label(LocalDate.now() + " · " + pageNumber + "/" + pageCount));
         for (Store.Row row : rows) {
             Label title = new Label(shorten(row.text("doc_libelle")) + " · " + row.text("copy_code")); title.setStyle("-fx-font-weight: bold;"); title.setWrapText(false); title.setMaxWidth(width);
-            Label details = new Label(shorten(row.text("student")) + " · " + row.text("cne") + " · " + row.text("phone") + "\n" + app.t("dueDate") + ": " + row.text("return_d")); details.setWrapText(true); details.setMaxWidth(width);
+            Label details = new Label(shorten(row.text("student")) + " · " + row.text("cne") + " · " + row.text("phone") + "\n" + app.t("dueDate") + ": " + row.text("return_d")); details.setWrapText(true); details.setMinWidth(width); details.setPrefWidth(width); details.setMaxWidth(width);
             VBox entry = new VBox(3, title, details, new Separator()); entry.setMinHeight(53); entry.setPrefHeight(53); entry.setMaxHeight(53); details.setMaxHeight(28); page.getChildren().add(entry);
         }
-        new Scene(page); page.setStyle("-fx-font-size: 10px; -fx-background-color: white; -fx-text-fill: black;"); page.applyCss(); page.layout(); return page;
+        new Scene(page); page.setStyle("-fx-font-size: 10px; -fx-background-color: white; -fx-text-fill: black;"); page.applyCss(); page.resize(width, page.prefHeight(width)); page.layout(); return page;
     }
     private static String shorten(String text) { return text.length() <= 70 ? text : text.substring(0, 67) + "…"; }
 
