@@ -1,13 +1,11 @@
 package papyrus;
 
-import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.image.WritableImage;
 import javafx.stage.Stage;
-import javafx.util.Duration;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.nio.file.*;
@@ -23,6 +21,7 @@ public final class UiSmoke {
     private static final Path SCREENSHOTS = Path.of("target", "screenshots");
 
     public static void main(String[] args) throws Exception {
+        UiTestSupport.start();
         data = Files.createTempDirectory("papyrus-ui-smoke-");
         System.setProperty("papyrus.dataDir", data.toString());
         Files.createDirectories(SCREENSHOTS);
@@ -43,8 +42,9 @@ public final class UiSmoke {
         });
         add(() -> {
             text("username", "demo"); text("name", "Papyrus Demo"); text("password", "demo-password"); text("confirmPassword", "demo-password"); click("signIn");
-            check(stage.getScene().lookup("#nav-dashboard") != null, "Setup opens workspace");
+
         });
+        await(() -> stage.getScene().lookup("#nav-dashboard") != null, "Setup opens workspace");
         add(() -> app.language("en"));
         if (!Boolean.getBoolean("papyrus.smoke.skipWindowManager")) {
         add(() -> stage.setMaximized(true));
@@ -72,11 +72,13 @@ public final class UiSmoke {
                 dialog = app.editor(Store.Entity.BOOKS, null); dialog.show();
             } catch (Exception ex) { throw new RuntimeException(ex); }
         });
+        await(() -> !combo("field-cat_id").getItems().isEmpty() && !combo("field-type_id").getItems().isEmpty(), "Classification selectors load");
         add(() -> {
             dialogText("doc_libelle", "The Library / المكتبة");
             combo("field-cat_id").getSelectionModel().selectFirst(); combo("field-type_id").getSelectionModel().selectFirst();
             dialogSave();
         });
+        await(() -> !dialog.isShowing(), "Document form saved");
         add(() -> {
             try {
                 check(app.store.list(Store.Entity.BOOKS).size() == 1, "UI saves document");
@@ -88,10 +90,16 @@ public final class UiSmoke {
                 app.navigate("books");
                 stage.getScene().getRoot().applyCss(); stage.getScene().getRoot().layout();
                 check(stage.getScene().lookup("#book-gallery") != null, "Cover gallery is visible");
+            } catch (Exception ex) { throw new RuntimeException(ex); }
+        });
+        await(() -> stage.getScene().lookup("#book-gallery") instanceof BookGallery gallery && !gallery.getItems().isEmpty(), "Cover gallery loads records");
+        add(() -> {
+            try {
                 screenshot("documents-en-light");
                 dialog = app.newBorrowDialog(); dialog.show();
             } catch (Exception ex) { throw new RuntimeException(ex); }
         });
+        await(() -> !combo("loan-book").getItems().isEmpty() && !combo("loan-student").getItems().isEmpty(), "Loan selectors load");
         add(() -> {
             var book = (SearchableComboBox<?>) combo("loan-book"); var student = (SearchableComboBox<?>) combo("loan-student");
             book.searchEditor().requestFocus(); book.show(); book.searchEditor().setText("Library");
@@ -102,6 +110,7 @@ public final class UiSmoke {
             check(student.getValue() != null, "Phone search selects a matching student");
             screenshot("loan-search-en", dialog.getDialogPane()); dialogSave();
         });
+        await(() -> !dialog.isShowing(), "Loan form saved");
         add(() -> {
             try { check(app.store.statistics().get("loans") == 1, "UI creates loan"); } catch (Exception ex) { throw new RuntimeException(ex); }
             app.navigate("dashboard");
@@ -113,6 +122,7 @@ public final class UiSmoke {
                 add(() -> app.theme(dark));
                 for (String page : List.of("dashboard", "books", "students", "loans", "types", "categories", "staff", "activity", "settings")) {
                     add(() -> {
+                        UiTestSupport.progress(language + " / " + dark + " / " + page);
                         app.navigate(page);
                         check(stage.getScene().getRoot().getNodeOrientation() == (language.equals("ar") ? javafx.geometry.NodeOrientation.RIGHT_TO_LEFT : javafx.geometry.NodeOrientation.LEFT_TO_RIGHT), "Screen direction");
                         if (language.equals("ar") && dark && List.of("dashboard", "loans", "settings").contains(page)) screenshot(page + "-ar-dark");
@@ -152,7 +162,9 @@ public final class UiSmoke {
         });
         add(() -> {
             text("username", "demo"); text("password", "demo-password"); click("signIn");
-            check(stage.getScene().lookup("#nav-dashboard") != null, "Re-login succeeds");
+        });
+        await(() -> stage.getScene().lookup("#nav-dashboard") != null, "Re-login succeeds");
+        add(() -> {
             System.out.println("UI SMOKE PASSED: setup, login, create document, borrow, return, 54 page/theme/language combinations, screenshots");
         });
         add(() -> {
@@ -161,12 +173,24 @@ public final class UiSmoke {
         });
     }
 
+    private static void await(java.util.function.BooleanSupplier condition, String message) {
+        STEPS.add(new Runnable() {
+            long deadline;
+            @Override public void run() {
+                if (deadline == 0) deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(15);
+                UiTestSupport.step = message;
+                if (condition.getAsBoolean()) { UiTestSupport.progress(message); return; }
+                check(System.nanoTime() < deadline, message);
+                ((ArrayDeque<Runnable>) STEPS).addFirst(this);
+            }
+        });
+    }
     private static void add(Runnable runnable) { STEPS.add(runnable); }
     private static void advance() {
         Runnable next = STEPS.poll(); if (next == null) return;
         try {
             next.run();
-            PauseTransition wait = new PauseTransition(Duration.millis(180)); wait.setOnFinished(e -> advance()); wait.play();
+            UiTestSupport.next(UiSmoke::advance, 180);
         } catch (Throwable error) { fail(error); }
     }
     private static void text(String id, String value) { ((TextInputControl) stage.getScene().lookup("#" + id)).setText(value); }
@@ -175,14 +199,15 @@ public final class UiSmoke {
     private static void click(String id) { ((Button) stage.getScene().lookup("#" + id)).fire(); }
     private static void dialogSave() {
         ((Button) dialog.getDialogPane().lookupButton(dialog.getDialogPane().getButtonTypes().getFirst())).fire();
-        check(!dialog.isShowing(), "Form saves without validation errors");
+
     }
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
     private static void screenshot(String name) {
         screenshot(name, stage.getScene().getRoot());
     }
-    private static void screenshot(String name, Node root) {
+    static void screenshot(String name, Node root) {
         try {
+            UiTestSupport.progress("screenshot " + name);
             root.applyCss(); ((javafx.scene.Parent) root).layout();
             WritableImage image = root.snapshot(null, null);
             saveImage(name, image);
@@ -190,6 +215,7 @@ public final class UiSmoke {
     }
     private static void saveImage(String name, WritableImage image) {
         try {
+            Files.createDirectories(SCREENSHOTS);
             BufferedImage png = new BufferedImage((int) image.getWidth(), (int) image.getHeight(), BufferedImage.TYPE_INT_ARGB);
             for (int y = 0; y < png.getHeight(); y++) for (int x = 0; x < png.getWidth(); x++) png.setRGB(x, y, image.getPixelReader().getArgb(x, y));
             ImageIO.write(png, "png", SCREENSHOTS.resolve(name + ".png").toFile());

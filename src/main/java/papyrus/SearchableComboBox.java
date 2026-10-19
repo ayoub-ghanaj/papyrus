@@ -40,7 +40,9 @@ final class SearchableComboBox<T> extends ComboBox<T> {
         private final Label count = new Label();
         private final VBox panel;
         private boolean updating;
-        private final ListChangeListener<T> itemsChanged = change -> filter();
+        private final Map<T, String> searchIndex = new IdentityHashMap<>();
+        private final javafx.animation.PauseTransition delay = new javafx.animation.PauseTransition(javafx.util.Duration.millis(120));
+        private final ListChangeListener<T> itemsChanged = change -> { searchIndex.clear(); filter(); };
 
         PickerSkin(SearchableComboBox<T> control) {
             super(control);
@@ -73,14 +75,16 @@ final class SearchableComboBox<T> extends ComboBox<T> {
             registerChangeListener(control.valueProperty(), observable -> { if (!updating) { updating = true; editor.setText(Objects.toString(control.getValue(), "")); updating = false; filter(); } });
             registerChangeListener(control.promptTextProperty(), observable -> editor.setPromptText(control.getPromptText()));
             registerChangeListener(control.sceneProperty(), observable -> { if (control.getScene() == null) control.hide(); });
+            delay.setOnFinished(event -> filter());
             editor.textProperty().addListener((observable, before, after) -> {
                 if (updating) return;
                 updating = true; control.setValue(null); updating = false;
-                filter(); if (editor.isFocused()) control.show();
+                delay.playFromStart(); if (editor.isFocused()) control.show();
             });
             editor.setOnMouseClicked(event -> control.show());
             editor.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, event -> {
                 KeyCode key = event.getCode();
+                if ((key == KeyCode.ENTER || key == KeyCode.DOWN || key == KeyCode.UP) && delay.getStatus() == javafx.animation.Animation.Status.RUNNING) { delay.stop(); filter(); }
                 if (key == KeyCode.DOWN || key == KeyCode.UP) {
                     control.show();
                     if (key == KeyCode.DOWN) suggestions.getSelectionModel().selectNext(); else suggestions.getSelectionModel().selectPrevious();
@@ -97,7 +101,8 @@ final class SearchableComboBox<T> extends ComboBox<T> {
 
         private void filter() {
             String query = control.getValue() == null ? editor.getText() : "";
-            suggestions.getItems().setAll(control.getItems().stream().filter(item -> SearchText.matches(item, query)).toList());
+            String[] tokens = SearchText.normalize(query).strip().split("\\s+");
+            suggestions.getItems().setAll(control.getItems().stream().filter(item -> Arrays.stream(tokens).allMatch(searchIndex.computeIfAbsent(item, SearchText::index)::contains)).toList());
             suggestions.getSelectionModel().clearSelection();
             suggestions.setPrefHeight(Math.max(65, Math.min(7, suggestions.getItems().size()) * 53 + 2));
             count.setText(suggestions.getItems().size() + " " + control.i18n.text("suggestions") + " · " + control.i18n.text("searchHelp"));
@@ -119,6 +124,6 @@ final class SearchableComboBox<T> extends ComboBox<T> {
             control.hide(); filter(); editor.positionCaret(editor.getLength());
         }
 
-        @Override public void dispose() { popup.hide(); control.getItems().removeListener(itemsChanged); super.dispose(); }
+        @Override public void dispose() { delay.stop(); popup.hide(); control.getItems().removeListener(itemsChanged); super.dispose(); }
     }
 }

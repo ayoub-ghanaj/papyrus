@@ -149,3 +149,6 @@
 .carousel-control { -fx-background-color: rgba(255,255,255,0.14); -fx-border-color: rgba(255,255,255,0.2); -fx-text-fill: #ffffff; -fx-padding: 5 10; -fx-font-size: 15px; }
 .carousel-control:hover { -fx-background-color: rgba(255,255,255,0.25); }
 .tooltip { -fx-background-color: -ink; -fx-text-fill: -paper; }
+
+.book-gallery { -fx-background-color: transparent; -fx-border-width: 0; }
+.book-gallery > .virtual-flow > .clipped-container > .sheet > .list-cell { -fx-background-color: transparent; -fx-padding: 4; }

@@ -2,7 +2,6 @@ package papyrus;
 
 import java.io.IOException;
 import java.nio.file.*;
-import java.util.UUID;
 
 final class AppPaths {
     static Path dataDirectory() {
@@ -17,13 +16,6 @@ final class AppPaths {
     }
 
     static String importImage(Path source, Path data) throws IOException {
-        String name = source.getFileName().toString();
-        int dot = name.lastIndexOf('.');
-        String extension = dot < 0 ? "" : name.substring(dot).toLowerCase(java.util.Locale.ROOT);
-        if (!java.util.Set.of(".png", ".jpg", ".jpeg").contains(extension)) throw new IOException("Unsupported image");
-        if (Files.size(source) > 10 * 1024 * 1024) throw new IOException("Image exceeds 10 MB");
-        Path destination = Files.createDirectories(data.resolve("images")).resolve(UUID.randomUUID() + extension);
-        Files.copy(source, destination);
-        return destination.toUri().toString();
+        return ImageStorage.importImage(source, data);
     }
 }

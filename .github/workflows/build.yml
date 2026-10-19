@@ -2,7 +2,7 @@ name: Build and package
 
 on:
   push:
-    branches: [master, main, 'feat/**']
+    branches: [master, main]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -24,6 +24,17 @@ jobs:
           distribution: temurin
           java-version: '25'
           cache: maven
+      - name: Check release version
+        shell: bash
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_TYPE" = tag ]; then
+            python scripts/check-release.py --tag "$REF_NAME"
+          else
+            python scripts/check-release.py
+          fi
       - name: Install Linux packaging and display tools
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y fakeroot xvfb libgtk-3-0
@@ -44,10 +55,15 @@ jobs:
         if: runner.os == 'Windows'
         run: .\mvnw.cmd -B -ntp clean verify
       - name: Exercise desktop UI (Linux)
+        timeout-minutes: 8
         if: runner.os == 'Linux'
-        run: xvfb-run -a -s '-screen 0 1920x1080x24' java --enable-native-access=ALL-UNNAMED -Dpapyrus.smoke.skipWindowManager=true -cp 'target/test-classes:target/classes:target/lib/*' papyrus.UiSmoke
+        run: |
+          xvfb-run -a -s '-screen 0 1920x1080x24' java --enable-native-access=ALL-UNNAMED -Dpapyrus.smoke.skipWindowManager=true -cp 'target/test-classes:target/classes:target/lib/*' papyrus.UiSmoke
+          xvfb-run -a -s '-screen 0 1920x1080x24' java --enable-native-access=ALL-UNNAMED -Dpapyrus.smoke.skipWindowManager=true -cp 'target/test-classes:target/classes:target/lib/*' papyrus.UiReliabilitySmoke
       - name: Build installers and portable downloads
         run: python scripts/package.py --skip-build
+      - name: Verify native installation and upgrade
+        run: python scripts/installer-smoke.py
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: papyrus-${{ runner.os }}-x64
@@ -84,4 +100,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
+          python scripts/check-release.py --tag "$RELEASE_TAG"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "A release already exists for $RELEASE_TAG; refusing to create or replace it."
+            exit 1
+          fi
+          python scripts/verify-downloads.py release-assets
           gh release create "$RELEASE_TAG" release-assets/* --verify-tag --draft --title "Papyrus $RELEASE_TAG" --notes-file RELEASE_NOTES.md

@@ -33,6 +33,18 @@ public final class PapyrusApp extends Application {
     private String searchValue = "";
     private final Map<String, Image> windowIcons = new HashMap<>();
     private LoginCarousel carousel;
+    private final UiTasks tasks = new UiTasks();
+    private final LibraryTools tools = new LibraryTools(this);
+    private int generation;
+    private final Map<String, Filters> pageFilters = new HashMap<>();
+    private static final class Filters {
+        String search = ""; int availability, role; Integer category, type; boolean history, overdue;
+    }
+    private Filters filters() { return pageFilters.computeIfAbsent(page, ignored -> new Filters()); }
+    I18n i18n() { return i18n; }
+    UiTasks tasks() { return tasks; }
+    Stage window() { return stage; }
+
     Store store;
 
     @Override public void start(Stage stage) {
@@ -59,7 +71,7 @@ public final class PapyrusApp extends Application {
         }
     }
 
-    @Override public void stop() throws Exception { stopCarousel(); if (store != null) store.close(); }
+    @Override public void stop() throws Exception { stopCarousel(); tasks.close(); if (store != null) store.close(); }
     private void stopCarousel() { if (carousel != null) { carousel.dispose(); carousel = null; } }
     String t(String key) { return i18n.text(key); }
 
@@ -103,7 +115,8 @@ public final class PapyrusApp extends Application {
 
     void showLogin() {
         try {
-            stopCarousel();
+            stopCarousel(); generation++;
+            pageFilters.clear(); searchValue = "";
             stage.setTitle("Papyrus");
             stage.getIcons().setAll(new Image(Objects.requireNonNull(getClass().getResourceAsStream("/papyrus/icon.png"))));
             boolean setup = store.needsSetup();
@@ -120,16 +133,17 @@ public final class PapyrusApp extends Application {
             PasswordField confirm = new PasswordField(); confirm.setId("confirmPassword");
             Label error = label("", "error-label"); error.setWrapText(true); error.setVisible(false); error.setManaged(false);
             Button submit = button(setup ? "createAccount" : "signIn", () -> {
-                try {
-                    if (setup) {
-                        if (!password.getText().equals(confirm.getText())) throw new Store.Rule("passwordMismatch");
-                        store.setup(username.getText(), name.getText(), password.getText());
-                    }
-                    store.login(username.getText(), password.getText());
-                    password.clear(); confirm.clear(); page = "dashboard"; showWorkspace();
-                } catch (Exception ex) {
-                    error.setText(message(ex)); error.setVisible(true); error.setManaged(true);
+                if (setup && !password.getText().equals(confirm.getText())) {
+                    error.setText(t("passwordMismatch")); error.setVisible(true); error.setManaged(true); return;
                 }
+                String loginValue = username.getText(), nameValue = name.getText(), passwordValue = password.getText();
+                pane.setDisable(true);
+                tasks.submit(() -> {
+                    if (setup) store.setup(loginValue, nameValue, passwordValue);
+                    return store.login(loginValue, passwordValue);
+                }, user -> { pane.setDisable(false); password.clear(); confirm.clear(); page = "dashboard"; showWorkspace(); }, ex -> {
+                    pane.setDisable(false); error.setText(message(ex)); error.setVisible(true); error.setManaged(true);
+                });
             });
             submit.setId("signIn"); submit.getStyleClass().add("primary"); submit.setMaxWidth(Double.MAX_VALUE); submit.setDefaultButton(true);
             VBox form = new VBox(12, eyebrow, title, intro, new Region(), field("login", username));
@@ -158,21 +172,24 @@ public final class PapyrusApp extends Application {
         BorderPane pane = new BorderPane();
         VBox sidebar = new VBox(8); sidebar.getStyleClass().add("sidebar"); sidebar.setPrefWidth(218); sidebar.setMinWidth(218);
         Label section = label(t("library"), "eyebrow"); section.setWrapText(true); VBox.setMargin(section, new Insets(24, 0, 10, 10));
-        sidebar.getChildren().addAll(brand(), section);
+        VBox navigation = new VBox(8);
+        ScrollPane navigationScroll = new ScrollPane(navigation); navigationScroll.setFitToWidth(true); navigationScroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER); navigationScroll.setMinHeight(0);
+        VBox.setVgrow(navigationScroll, Priority.ALWAYS); sidebar.setMinHeight(0);
+        sidebar.getChildren().addAll(brand(), section, navigationScroll);
         for (String key : List.of("dashboard", "books", "students", "loans", "types", "categories", "staff", "activity")) {
             if ((key.equals("staff") || key.equals("activity")) && !store.user().admin()) continue;
             Button nav = button(key, () -> navigate(key)); nav.setGraphic(icon(key)); nav.setId("nav-" + key);
             nav.getStyleClass().add("nav"); if (page.equals(key)) nav.getStyleClass().add("selected");
-            nav.setMaxWidth(Double.MAX_VALUE); nav.setAlignment(Pos.CENTER_LEFT); sidebar.getChildren().add(nav);
+            nav.setMaxWidth(Double.MAX_VALUE); nav.setAlignment(Pos.CENTER_LEFT); navigation.getChildren().add(nav);
         }
-        sidebar.getChildren().add(spacer());
         Button settings = button("settings", () -> navigate("settings")); settings.setGraphic(icon("settings")); settings.getStyleClass().add("nav"); settings.setId("nav-settings"); settings.setMaxWidth(Double.MAX_VALUE);
         if (page.equals("settings")) settings.getStyleClass().add("selected");
-        Label user = label(store.user().name(), "account-name"); user.setWrapText(true);
+        Label user = label(store.user().name(), "account-name"); user.setWrapText(true); user.setMaxHeight(40); user.setTooltip(new Tooltip(store.user().name()));
         Label role = label(t(store.user().admin() ? "admin" : "staffRole"), "muted");
-        Button logout = button("logout", () -> { try { store.logout(); showLogin(); } catch (SQLException ex) { showError(ex); } });
+        Button logout = button("logout", () -> tasks.submit(() -> { store.logout(); return true; }, done -> showLogin(), ex -> { showLogin(); showError(ex); }));
         logout.getStyleClass().add("quiet"); logout.setId("logout");
-        sidebar.getChildren().addAll(settings, new Separator(), user, role, logout);
+        navigation.getChildren().add(settings);
+        sidebar.getChildren().addAll(new Separator(), user, role, logout);
         pane.setLeft(sidebar);
 
         VBox workspace = new VBox();
@@ -184,10 +201,10 @@ public final class PapyrusApp extends Application {
         try { renderPage(); } catch (Exception ex) { showError(ex); }
     }
 
-    void navigate(String page) { this.page = page; searchValue = ""; showWorkspace(); }
+    void navigate(String page) { this.page = page; searchValue = filters().search; showWorkspace(); }
 
     private void renderPage() throws SQLException {
-        content.getChildren().clear();
+        content.getChildren().clear(); generation++;
         switch (page) {
             case "dashboard" -> dashboard();
             case "books" -> booksPage();
@@ -202,292 +219,171 @@ public final class PapyrusApp extends Application {
         }
     }
 
-    private void dashboard() throws SQLException {
-        HBox heading = heading("dashboard", "dashboardHint");
-        heading.getChildren().add(button("borrow", this::borrowDialog)); content.getChildren().add(heading);
-        Map<String, Integer> totals = store.statistics();
-        GridPane cards = new GridPane(); cards.setHgap(14);
-        String[] labels = {"totalDocuments", "totalStudents", "activeLoansLabel", "overdue"};
-        String[] keys = {"books", "students", "loans", "overdue"};
-        for (int i = 0; i < keys.length; i++) {
-            VBox card = new VBox(14, label(t(labels[i]), "muted"), label(Integer.toString(totals.get(keys[i])), "stat-value"));
-            card.getStyleClass().add("card"); card.setMinWidth(0);
-            if (i == 3) card.getStyleClass().add("overdue-card");
-            GridPane.setHgrow(card, Priority.ALWAYS); cards.add(card, i, 0);
-            ColumnConstraints column = new ColumnConstraints(); column.setPercentWidth(25); cards.getColumnConstraints().add(column);
-        }
-        content.getChildren().add(cards);
-        CategoryAxis names = new CategoryAxis(); NumberAxis counts = new NumberAxis(); counts.setTickUnit(1); counts.setMinorTickVisible(false);
-        BarChart<String, Number> chart = new BarChart<>(names, counts); chart.setLegendVisible(false); chart.setAnimated(false); chart.setPrefHeight(230);
-        XYChart.Series<String, Number> series = new XYChart.Series<>();
-        for (Store.Row row : store.popularBooks()) series.getData().add(new XYChart.Data<>(row.text("doc_libelle"), row.number("total")));
-        chart.getData().add(series);
-        VBox chartCard = new VBox(12, label(t("popularBooks"), "section-title"), series.getData().isEmpty() ? empty("noActivity") : chart);
-        chartCard.getStyleClass().add("card"); content.getChildren().add(chartCard);
-        TableView<Store.Row> recent = loanTable(store.loans(true, null, null).stream().limit(8).toList()); recent.setPrefHeight(260);
-        content.getChildren().addAll(label(t("recentLoans"), "section-title"), recent);
+    private record DashboardData(Map<String, Integer> totals, List<Store.Row> popular, List<Store.Row> recent) {}
+    private void dashboard() {
+        int request = generation;
+        HBox heading = heading("dashboard", "dashboardHint"); heading.getChildren().add(button("borrow", this::borrowDialog));
+        ProgressIndicator loading = new ProgressIndicator(); loading.setMaxSize(32, 32); content.getChildren().addAll(heading, loading);
+        tasks.submit(() -> new DashboardData(store.statistics(), store.popularBooks(), store.loans(true, null, null, 8)), data -> {
+            if (request != generation) return;
+            content.getChildren().remove(loading);
+            GridPane cards = new GridPane(); cards.setHgap(14);
+            String[] labels = {"totalDocuments", "totalStudents", "activeLoansLabel", "overdue"};
+            String[] keys = {"books", "students", "loans", "overdue"};
+            for (int i = 0; i < keys.length; i++) {
+                VBox card = new VBox(14, label(t(labels[i]), "muted"), label(Integer.toString(data.totals().get(keys[i])), "stat-value"));
+                card.getStyleClass().add("card"); card.setMinWidth(0); if (i == 3) card.getStyleClass().add("overdue-card");
+                GridPane.setHgrow(card, Priority.ALWAYS); cards.add(card, i, 0); ColumnConstraints column = new ColumnConstraints(); column.setPercentWidth(25); cards.getColumnConstraints().add(column);
+            }
+            content.getChildren().add(cards);
+            CategoryAxis names = new CategoryAxis(); NumberAxis counts = new NumberAxis(); counts.setTickUnit(1); counts.setMinorTickVisible(false);
+            BarChart<String, Number> chart = new BarChart<>(names, counts); chart.setLegendVisible(false); chart.setAnimated(false); chart.setPrefHeight(230);
+            XYChart.Series<String, Number> series = new XYChart.Series<>();
+            for (Store.Row row : data.popular()) series.getData().add(new XYChart.Data<>(row.text("doc_libelle"), row.number("total")));
+            chart.getData().add(series);
+            VBox chartCard = new VBox(12, label(t("popularBooks"), "section-title"), series.getData().isEmpty() ? empty("noActivity") : chart); chartCard.getStyleClass().add("card");
+            TableView<Store.Row> recent = loanTable(data.recent()); recent.setPrefHeight(260);
+            content.getChildren().addAll(chartCard, label(t("recentLoans"), "section-title"), recent);
+        }, ex -> { if (request == generation) showError(ex); });
     }
 
-    private void entityPage(Store.Entity entity, String hint) throws SQLException {
-        HBox heading = heading(page, hint);
-        Button add = button("add", () -> editor(entity, null).showAndWait()); add.setId("add"); add.getStyleClass().add("primary");
-        heading.getChildren().add(add); content.getChildren().add(heading);
-        List<Store.Row> rows = store.list(entity);
+    private void entityPage(Store.Entity entity, String hint) {
+        int request = generation; Filters state = filters();
+        HBox heading = heading(page, hint); Button add = button("add", () -> editor(entity, null).showAndWait()); add.setId("add"); add.getStyleClass().add("primary"); heading.getChildren().add(add);
         TableView<Store.Row> table = table(); table.setId("records");
         switch (entity) {
-            case BOOKS -> { column(table, "doc_libelle", "doc_libelle", 260); column(table, "cat_libelle", "cat_libelle", 130); column(table, "ty_libelle", "ty_libelle", 120); column(table, "state", row -> t(row.text("borrowed").equals("1") ? "borrowed" : "available"), 130); }
             case STUDENTS -> { column(table, "cne", "cne", 120); column(table, "prenom", "prenom", 150); column(table, "nom", "nom", 150); column(table, "phone", "phone", 140); column(table, "email", "email", 190); }
             case STAFF -> { column(table, "cin", "cin", 180); column(table, "prenom", "prenom", 140); column(table, "nom", "nom", 140); column(table, "phone", "phone", 130); column(table, "role", row -> t(row.text("role").equals("1") ? "admin" : "staffRole"), 150); }
             case TYPES -> column(table, "ty_libelle", "ty_libelle", 500);
             case CATEGORIES -> column(table, "cat_libelle", "cat_libelle", 500);
+            default -> throw new IllegalArgumentException("Use the document gallery");
         }
-        TextField search = searchField();
-        ComboBox<String> availability = new ComboBox<>(FXCollections.observableArrayList(t("all"), t("available"), t("borrowed")));
-        availability.setValue(t("all")); availability.setAccessibleText(t("filterAvailability"));
-        ComboBox<Store.Row> category = new SearchableComboBox<>(store.choices(Store.Entity.CATEGORIES), i18n);
-        ComboBox<Store.Row> type = new SearchableComboBox<>(store.choices(Store.Entity.TYPES), i18n);
-        category.setPromptText(t("cat_libelle")); type.setPromptText(t("ty_libelle")); category.setAccessibleText(t("cat_libelle")); type.setAccessibleText(t("ty_libelle"));
-        FilteredList<Store.Row> filtered = new FilteredList<>(FXCollections.observableArrayList(rows));
-        ComboBox<String> roles = new ComboBox<>(FXCollections.observableArrayList(t("all"), t("admin"), t("staffRole"))); roles.setValue(t("all")); roles.setAccessibleText(t("role"));
-        Runnable filter = () -> {
-            searchValue = search.getText(); String query = searchValue.strip().toLowerCase(Locale.ROOT);
-            filtered.setPredicate(row -> SearchText.matches(row, query)
-                    && (entity != Store.Entity.STAFF || roles.getSelectionModel().getSelectedIndex() == 0 || row.text("role").equals(Integer.toString(roles.getSelectionModel().getSelectedIndex())))
-                    && (entity != Store.Entity.BOOKS || ((availability.getSelectionModel().getSelectedIndex() == 0 || row.text("borrowed").equals(availability.getSelectionModel().getSelectedIndex() == 1 ? "0" : "1"))
-                    && (category.getValue() == null || category.getValue().text("cat_id").equals(row.text("cat_id")))
-                    && (type.getValue() == null || type.getValue().text("type_id").equals(row.text("type_id"))))));
-            table.setPlaceholder(empty(query.isEmpty() ? "emptyHint" : "noResults"));
-        };
-        search.textProperty().addListener((o, a, b) -> filter.run());
-        availability.setOnAction(e -> filter.run()); category.setOnAction(e -> filter.run()); type.setOnAction(e -> filter.run());
-        roles.setOnAction(e -> filter.run());
-        var sorted = new javafx.collections.transformation.SortedList<>(filtered);
-        sorted.comparatorProperty().bind(table.comparatorProperty());
-        table.setItems(sorted); filter.run();
-        HBox tools = new HBox(10, search); tools.setAlignment(Pos.CENTER_LEFT); HBox.setHgrow(search, Priority.ALWAYS);
-        if (entity == Store.Entity.BOOKS) tools.getChildren().addAll(availability, category, type);
-        if (entity == Store.Entity.STAFF) tools.getChildren().add(roles);
-        tools.getChildren().add(button("refresh", this::refresh));
-
-        Button edit = button("edit", () -> selected(table, row -> editor(entity, row).showAndWait())); edit.setId("edit");
-        Button delete = button("delete", () -> selected(table, row -> { if (confirm("deleteConfirm")) run(() -> { store.delete(entity, row.number(entity.id)); refresh(); }); })); delete.getStyleClass().add("danger"); delete.setId("delete");
-        HBox actions = new HBox(10, edit, delete);
-        edit.disableProperty().bind(table.getSelectionModel().selectedItemProperty().isNull()); delete.disableProperty().bind(table.getSelectionModel().selectedItemProperty().isNull());
-        if (List.of(Store.Entity.BOOKS, Store.Entity.STUDENTS, Store.Entity.STAFF).contains(entity)) {
-            Button history = button("history", () -> selected(table, row -> historyDialog(entity, row))); history.disableProperty().bind(table.getSelectionModel().selectedItemProperty().isNull()); actions.getChildren().add(history);
-        }
-        Label count = label(rows.size() + " " + t("recordCount"), "muted"); actions.getChildren().addAll(spacer(), count); actions.setAlignment(Pos.CENTER_LEFT);
-        table.setOnMouseClicked(event -> { if (event.getClickCount() == 2 && table.getSelectionModel().getSelectedItem() != null) editor(entity, table.getSelectionModel().getSelectedItem()).showAndWait(); });
-        content.getChildren().addAll(tools, table, actions);
-    }
-
-    private void booksPage() throws SQLException {
-        HBox heading = heading("books", "documentsHint");
-        Button add = button("add", () -> editor(Store.Entity.BOOKS, null).showAndWait()); add.setId("add"); add.getStyleClass().add("primary"); heading.getChildren().add(add);
-        List<Store.Row> rows = store.list(Store.Entity.BOOKS);
-        TextField search = searchField();
-        ComboBox<String> availability = new ComboBox<>(FXCollections.observableArrayList(t("all"), t("available"), t("borrowed")));
-        availability.setValue(t("all")); availability.setAccessibleText(t("filterAvailability"));
-        ComboBox<Store.Row> category = new SearchableComboBox<>(store.choices(Store.Entity.CATEGORIES), i18n);
-        ComboBox<Store.Row> type = new SearchableComboBox<>(store.choices(Store.Entity.TYPES), i18n);
-        category.setPromptText(t("cat_libelle")); type.setPromptText(t("ty_libelle"));
-        category.setAccessibleText(t("cat_libelle")); type.setAccessibleText(t("ty_libelle"));
-        HBox tools = new HBox(10, search, availability, category, type, button("refresh", this::refresh)); tools.setAlignment(Pos.CENTER_LEFT); HBox.setHgrow(search, Priority.ALWAYS);
-        javafx.beans.property.ObjectProperty<Store.Row> selected = new javafx.beans.property.SimpleObjectProperty<>();
-        TilePane gallery = new TilePane(18, 18); gallery.setPrefTileWidth(210); gallery.setPrefTileHeight(365); gallery.setAlignment(Pos.TOP_LEFT); gallery.setPadding(new Insets(2)); gallery.setId("book-gallery");
-        selected.addListener((observable, before, after) -> gallery.getChildren().forEach(card -> card.pseudoClassStateChanged(javafx.css.PseudoClass.getPseudoClass("selected"), Objects.equals(card.getProperties().get("record"), after))));
-        ScrollPane scroll = new ScrollPane(gallery); scroll.setFitToWidth(true); scroll.setPrefViewportHeight(490); VBox.setVgrow(scroll, Priority.ALWAYS);
+        TextField search = searchField(); search.setText(state.search);
+        var source = FXCollections.<Store.Row>observableArrayList(); FilteredList<Store.Row> filtered = new FilteredList<>(source);
+        ComboBox<String> roles = new ComboBox<>(FXCollections.observableArrayList(t("all"), t("admin"), t("staffRole"))); roles.getSelectionModel().select(state.role); roles.setAccessibleText(t("role"));
         Label count = label("", "muted");
         Runnable filter = () -> {
-            searchValue = search.getText(); String query = searchValue.strip().toLowerCase(Locale.ROOT);
-            List<Store.Row> visible = rows.stream().filter(row -> SearchText.matches(row, query)
-                    && (availability.getSelectionModel().getSelectedIndex() == 0 || row.text("borrowed").equals(availability.getSelectionModel().getSelectedIndex() == 1 ? "0" : "1"))
-                    && (category.getValue() == null || category.getValue().text("cat_id").equals(row.text("cat_id")))
-                    && (type.getValue() == null || type.getValue().text("type_id").equals(row.text("type_id")))).toList();
-            selected.set(null); gallery.getChildren().clear();
-            for (Store.Row row : visible) {
-                ImageView image = new ImageView(); image.setFitWidth(174); image.setFitHeight(190); image.setPreserveRatio(true); showImage(image, row.text("image"));
-                VBox placeholder = new VBox(10, icon("books"), label(t("noImage"), "muted")); placeholder.setAlignment(Pos.CENTER); placeholder.visibleProperty().bind(image.imageProperty().isNull());
-                StackPane cover = new StackPane(placeholder, image); cover.getStyleClass().add("book-cover"); cover.setPrefHeight(200); cover.setMinHeight(200);
-                Label title = label(row.text("doc_libelle"), "book-title"); title.setWrapText(true); title.setMaxWidth(180); title.setMinHeight(40);
-                Label classification = label(row.text("cat_libelle") + " · " + row.text("ty_libelle"), "muted"); classification.setMaxWidth(180);
-                Label state = label(t(row.text("borrowed").equals("1") ? "borrowed" : "available"), "book-status");
-                Button borrow = button("borrow", () -> run(() -> newBorrowDialog(row.number("doc_id")).showAndWait()));
-                borrow.getStyleClass().add("quiet"); borrow.setDisable(row.text("borrowed").equals("1")); borrow.setMaxWidth(Double.MAX_VALUE);
-                VBox card = new VBox(7, cover, title, classification, state, borrow); card.setPrefWidth(210); card.getStyleClass().add("book-card");
-                card.setFocusTraversable(true); card.setAccessibleText(row.text("doc_libelle"));
-                card.setOnMouseClicked(event -> { selected.set(row); if (event.getClickCount() == 2) editor(Store.Entity.BOOKS, row).showAndWait(); });
-                card.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER || event.getCode() == KeyCode.SPACE) selected.set(row); });
-                card.getProperties().put("record", row);
-                gallery.getChildren().add(card);
-            }
-            scroll.setContent(visible.isEmpty() ? empty(query.isEmpty() ? "emptyHint" : "noResults") : gallery);
-            count.setText(visible.size() + " " + t("recordCount"));
+            state.search = search.getText(); searchValue = state.search; state.role = roles.getSelectionModel().getSelectedIndex();
+            filtered.setPredicate(row -> SearchText.matches(row, state.search) && (entity != Store.Entity.STAFF || state.role == 0 || row.text("role").equals(Integer.toString(state.role))));
+            table.setPlaceholder(empty(state.search.isBlank() ? "emptyHint" : "noResults")); count.setText(filtered.size() + " " + t("recordCount"));
         };
-        search.textProperty().addListener((o, before, after) -> filter.run()); availability.setOnAction(e -> filter.run()); category.setOnAction(e -> filter.run()); type.setOnAction(e -> filter.run());
-        Button edit = button("edit", () -> editor(Store.Entity.BOOKS, selected.get()).showAndWait()); edit.setId("edit"); edit.disableProperty().bind(selected.isNull());
-        Button delete = button("delete", () -> { if (confirm("deleteConfirm")) run(() -> { store.delete(Store.Entity.BOOKS, selected.get().number("doc_id")); refresh(); }); }); delete.getStyleClass().add("danger"); delete.disableProperty().bind(selected.isNull());
-        Button history = button("history", () -> historyDialog(Store.Entity.BOOKS, selected.get())); history.disableProperty().bind(selected.isNull());
-        HBox actions = new HBox(10, edit, delete, history, spacer(), count); actions.setAlignment(Pos.CENTER_LEFT);
-        filter.run(); content.getChildren().addAll(heading, tools, scroll, actions);
-    }
-
-    private String searchable(Store.Entity entity, Store.Row row) {
-        // Excludes credentials and internal image file names.
-        return String.join(" ", switch (entity) {
-            case BOOKS -> List.of(row.text("doc_libelle"), row.text("cat_libelle"), row.text("ty_libelle"));
-            case STUDENTS -> List.of(row.text("cne"), row.text("nom"), row.text("prenom"), row.text("phone"), row.text("email"));
-            case STAFF -> List.of(row.text("cin"), row.text("nom"), row.text("prenom"), row.text("phone"));
-            case TYPES -> List.of(row.text("ty_libelle")); case CATEGORIES -> List.of(row.text("cat_libelle"));
-        });
-    }
-
-    Dialog<ButtonType> editor(Store.Entity entity, Store.Row row) {
-        Dialog<ButtonType> dialog = dialog(t(row == null ? "add" : "edit") + " · " + t(entity.name().toLowerCase(Locale.ROOT)), true, entity.name().toLowerCase(Locale.ROOT));
-        VBox fields = new VBox(22); fields.setPadding(new Insets(8)); fields.getStyleClass().add("editor");
-        String formTitle = t(row == null ? "add" : "edit") + " · " + t(entity.name().toLowerCase(Locale.ROOT));
-        Label formHint = label(t("formHint"), "muted"); formHint.setWrapText(true);
-        HBox introduction = new HBox(14, icon(entity.name().toLowerCase(Locale.ROOT)), new VBox(7, label(formTitle, "section-title"), formHint));
-        introduction.setAlignment(Pos.CENTER_LEFT); introduction.getStyleClass().add("form-intro");
-        GridPane grid = new GridPane(); grid.setHgap(16); grid.setVgap(20);
-        ColumnConstraints first = new ColumnConstraints(); first.setPercentWidth(50); first.setHgrow(Priority.ALWAYS);
-        ColumnConstraints second = new ColumnConstraints(); second.setPercentWidth(50); second.setHgrow(Priority.ALWAYS);
-        grid.getColumnConstraints().addAll(first, second);
-        VBox information = new VBox(16, label(t(entity == Store.Entity.STAFF ? "accountDetails" : "recordDetails"), "form-section"), grid);
-        HBox body = new HBox(26, information); HBox.setHgrow(information, Priority.ALWAYS); information.setMinWidth(360);
-        fields.getChildren().addAll(introduction, body);
-        int position = 0;
-        Set<String> required = switch (entity) {
-            case BOOKS -> Set.of("doc_libelle", "cat_id", "type_id");
-            case STUDENTS -> Set.of("cne", "nom", "prenom", "phone");
-            case STAFF -> row == null ? Set.of("cin", "nom", "prenom", "role", "pass") : Set.of("cin", "nom", "prenom", "role");
-            case TYPES -> Set.of("ty_libelle"); case CATEGORIES -> Set.of("cat_libelle");
-        };
-        Map<String, Control> controls = new LinkedHashMap<>();
-        ImageView preview = new ImageView(); preview.setFitWidth(155); preview.setFitHeight(155); preview.setPreserveRatio(true);
-        String[] imagePath = {row == null ? "" : row.text("image")};
-        Path[] pendingImage = {null};
-        showImage(preview, imagePath[0]);
-        for (String key : entity.fields) {
-            if (key.equals("image")) {
-                Button choose = button("chooseImage", () -> {
-                    FileChooser chooser = new FileChooser(); chooser.setTitle(t("chooseImage"));
-                    chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(t("image"), "*.png", "*.jpg", "*.jpeg", "*.PNG", "*.JPG", "*.JPEG"));
-                    File file = chooser.showOpenDialog(dialog.getDialogPane().getScene().getWindow());
-                    if (file != null) { pendingImage[0] = file.toPath(); showImage(preview, file.toURI().toString()); }
-                });
-                Button remove = button("removeImage", () -> { pendingImage[0] = null; imagePath[0] = ""; preview.setImage(null); });
-                choose.setMaxWidth(Double.MAX_VALUE); remove.setMaxWidth(Double.MAX_VALUE); remove.getStyleClass().add("quiet");
-                VBox placeholder = new VBox(10, icon(entity == Store.Entity.STUDENTS ? "students" : "books"), label(t("noImage"), "muted")); placeholder.setAlignment(Pos.CENTER);
-                placeholder.visibleProperty().bind(preview.imageProperty().isNull());
-                StackPane frame = new StackPane(placeholder, preview); frame.getStyleClass().add("image-frame"); frame.setPrefSize(190, 180); frame.setMinHeight(180); frame.setMaxHeight(180);
-                Label imageHint = label(t("imageHint"), "muted"); imageHint.setWrapText(true); imageHint.setMaxWidth(190);
-                VBox imagePanel = new VBox(10, label(t("image"), "form-section"), frame, choose, remove, imageHint); imagePanel.setMinWidth(190); imagePanel.setMaxWidth(190);
-                body.getChildren().add(imagePanel);
-                continue;
-            }
-            Control control;
-            if (key.equals("cat_id") || key.equals("type_id")) {
-                Store.Entity choiceEntity = key.equals("cat_id") ? Store.Entity.CATEGORIES : Store.Entity.TYPES;
-                ComboBox<Store.Row> combo = new SearchableComboBox<>(List.of(), i18n); combo.setMaxWidth(Double.MAX_VALUE);
-                run(() -> combo.getItems().setAll(store.choices(choiceEntity)));
-                if (row != null) combo.getItems().stream().filter(item -> item.text(choiceEntity.id).equals(row.text(key))).findFirst().ifPresent(combo::setValue);
-                control = combo;
-            } else if (key.equals("role")) {
-                ComboBox<String> combo = new ComboBox<>(FXCollections.observableArrayList(t("admin"), t("staffRole"))); combo.setMaxWidth(Double.MAX_VALUE);
-                combo.getSelectionModel().select(row != null && row.text(key).equals("1") ? 0 : 1); control = combo;
-            } else {
-                TextField text = key.equals("pass") ? new PasswordField() : new TextField();
-                if (row != null && !key.equals("pass")) text.setText(row.text(key));
-                if (key.equals("pass") && row != null) text.setPromptText(t("passwordHint"));
-                control = text;
-            }
-            control.setId("field-" + key); controls.put(key, control);
-            control.setMaxWidth(Double.MAX_VALUE);
-            String labelKey = key.equals("cat_id") ? "cat_libelle" : key.equals("type_id") ? "ty_libelle" : key;
-            VBox field = formField(labelKey, control, required.contains(key));
-            boolean wide = Set.of("doc_libelle", "ty_libelle", "cat_libelle", "pass").contains(key);
-            if (wide && position % 2 != 0) position++;
-            grid.add(field, position % 2, position / 2, wide ? 2 : 1, 1);
-            position += wide ? 2 : 1;
+        debounce(search, filter); roles.setOnAction(e -> filter.run());
+        var sorted = new javafx.collections.transformation.SortedList<>(filtered); sorted.comparatorProperty().bind(table.comparatorProperty()); table.setItems(sorted);
+        FlowPane toolbar = new FlowPane(10, 10, search); if (entity == Store.Entity.STAFF) toolbar.getChildren().add(roles); toolbar.getChildren().add(button("refresh", this::refresh));
+        Button edit = button("edit", () -> selected(table, row -> editor(entity, row).showAndWait())); edit.setId("edit");
+        Button delete = button("delete", () -> selected(table, row -> { if (confirm("deleteConfirm")) tools.work("delete", () -> { store.delete(entity, row.number(entity.id)); return true; }, done -> refresh()); })); delete.getStyleClass().add("danger"); delete.setId("delete");
+        edit.disableProperty().bind(table.getSelectionModel().selectedItemProperty().isNull()); delete.disableProperty().bind(table.getSelectionModel().selectedItemProperty().isNull());
+        FlowPane actions = new FlowPane(10, 10, edit, delete, button("archived", () -> tools.archived(entity)));
+        if (entity == Store.Entity.STUDENTS || entity == Store.Entity.STAFF) {
+            Button history = button("history", () -> selected(table, row -> historyDialog(entity, row))); history.disableProperty().bind(table.getSelectionModel().selectedItemProperty().isNull()); actions.getChildren().add(history);
         }
-        Label requiredHint = label(t("requiredHint"), "muted");
-        Label error = label("", "error-label"); error.setWrapText(true); fields.getChildren().addAll(requiredHint, error);
-        ScrollPane scroll = new ScrollPane(fields); scroll.setFitToWidth(true);
-        double desiredHeight = entity.fields.contains("image") ? 570 : entity.fields.size() > 4 ? 470 : 240;
-        double availableHeight = Screen.getScreensForRectangle(stage.getX(), stage.getY(), stage.getWidth(), stage.getHeight()).getFirst().getVisualBounds().getHeight() - 180;
-        scroll.setPrefViewportHeight(Math.min(desiredHeight, Math.max(300, availableHeight)));
-        scroll.setPrefViewportWidth(entity.fields.contains("image") ? 780 : 600);
-        dialog.getDialogPane().setContent(scroll);
-        dialog.getDialogPane().getStyleClass().add("editor-dialog");
-        Button save = (Button) dialog.getDialogPane().lookupButton(dialog.getDialogPane().getButtonTypes().getFirst());
-        save.addEventFilter(javafx.event.ActionEvent.ACTION, event -> {
-            Path imported = null;
-            try {
-                Map<String, String> values = new LinkedHashMap<>();
-                boolean missing = false;
-                for (var entry : controls.entrySet()) {
-                    Control control = entry.getValue(); String value;
-                    if (control instanceof TextInputControl text) value = text.getText();
-                    else if (entry.getKey().equals("role")) value = ((ComboBox<?>) control).getSelectionModel().getSelectedIndex() == 0 ? "1" : "2";
-                    else { Store.Row choice = (Store.Row) ((ComboBox<?>) control).getValue(); value = choice == null ? "" : choice.text(entry.getKey()); }
-                    values.put(entry.getKey(), value);
-                    boolean invalid = required.contains(entry.getKey()) && value.isBlank();
-                    control.pseudoClassStateChanged(javafx.css.PseudoClass.getPseudoClass("invalid"), invalid);
-                    missing |= invalid;
-                }
-                if (missing) throw new Store.Rule("required");
-                if (pendingImage[0] != null) {
-                    Image image = new Image(pendingImage[0].toUri().toString());
-                    if (image.isError()) throw new Store.Rule("imageError");
-                    try { imagePath[0] = AppPaths.importImage(pendingImage[0], store.directory); imported = Path.of(java.net.URI.create(imagePath[0])); }
-                    catch (IOException ex) { throw new Store.Rule("imageError"); }
-                }
-                values.put("image", imagePath[0]);
-                store.save(entity, row == null ? null : row.number(entity.id), values); refresh();
-            } catch (Exception ex) {
-                if (imported != null) try { Files.deleteIfExists(imported); } catch (IOException cleanup) { ex.addSuppressed(cleanup); }
-                event.consume(); error.setText(message(ex));
-            }
-        });
-        return dialog;
+        actions.getChildren().add(count);
+        table.setOnMouseClicked(e -> { if (e.getClickCount() == 2 && table.getSelectionModel().getSelectedItem() != null) editor(entity, table.getSelectionModel().getSelectedItem()).showAndWait(); });
+        content.getChildren().addAll(heading, toolbar, table, actions);
+        if (entity == Store.Entity.STUDENTS) content.getChildren().add(tools.transferButtons(entity));
+        tasks.submit(() -> store.list(entity), rows -> { if (request == generation) { source.setAll(rows); filter.run(); } }, ex -> { if (request == generation) showError(ex); });
     }
 
-    private void showImage(ImageView view, String path) {
-        if (path.isBlank()) { view.setImage(null); return; }
-        try {
-            String uri = path;
-            if (!path.startsWith("file:")) {
-                if (path.contains(":\\") && !System.getProperty("os.name").startsWith("Windows")) {
-                    String fileName = path.substring(path.lastIndexOf('\\') + 1);
-                    Path legacy = Path.of("resources", "img", fileName);
-                    if (Files.exists(legacy)) uri = legacy.toUri().toString(); else return;
-                } else uri = Path.of(path).toUri().toString();
-            }
-            Image image = new Image(uri, 220, 220, true, true); view.setImage(image.isError() ? null : image);
-        } catch (IllegalArgumentException ex) { view.setImage(null); }
+    private record CatalogData(List<Store.Row> books, List<Store.Row> categories, List<Store.Row> types, Map<Store.Row, String> search) {}
+    private void booksPage() {
+        int request = generation; Filters state = filters();
+        HBox heading = heading("books", "documentsHint"); Button add = button("add", () -> editor(Store.Entity.BOOKS, null).showAndWait()); add.setId("add"); add.getStyleClass().add("primary"); heading.getChildren().add(add);
+        TextField search = searchField(); search.setText(state.search);
+        ComboBox<String> availability = new ComboBox<>(FXCollections.observableArrayList(t("all"), t("available"), t("borrowed"))); availability.getSelectionModel().select(state.availability); availability.setAccessibleText(t("filterAvailability"));
+        ComboBox<Store.Row> category = new SearchableComboBox<>(List.of(), i18n), type = new SearchableComboBox<>(List.of(), i18n);
+        category.setPromptText(t("cat_libelle")); type.setPromptText(t("ty_libelle")); category.setAccessibleText(t("cat_libelle")); type.setAccessibleText(t("ty_libelle")); category.setPrefWidth(170); type.setPrefWidth(170);
+        FlowPane toolbar = new FlowPane(10, 10, search, availability, category, type, button("refresh", this::refresh));
+        BookGallery gallery = new BookGallery(i18n, store.directory, () -> icon("books"), row -> editor(Store.Entity.BOOKS, row).showAndWait(), row -> run(() -> newBorrowDialog(row.number("doc_id")).showAndWait()));
+        VBox.setVgrow(gallery, Priority.ALWAYS); Label count = label(t("working"), "muted");
+        CatalogData[] loaded = {null}; boolean[] restoringFilters = {false};
+        Runnable filter = () -> {
+            if (restoringFilters[0] || loaded[0] == null) return;
+            state.search = search.getText(); searchValue = state.search; state.availability = availability.getSelectionModel().getSelectedIndex();
+            state.category = category.getValue() == null ? null : category.getValue().number("cat_id"); state.type = type.getValue() == null ? null : type.getValue().number("type_id");
+            String[] tokens = SearchText.normalize(state.search).strip().split("\\s+");
+            List<Store.Row> visible = loaded[0].books().stream().filter(row -> Arrays.stream(tokens).allMatch(loaded[0].search().get(row)::contains)
+                    && (state.availability == 0 || row.text("borrowed").equals(state.availability == 1 ? "0" : "1"))
+                    && (state.category == null || Integer.toString(state.category).equals(row.text("cat_id"))) && (state.type == null || Integer.toString(state.type).equals(row.text("type_id")))).toList();
+            gallery.setRecords(visible); gallery.setPlaceholder(empty(state.search.isBlank() ? "emptyHint" : "noResults")); count.setText(visible.size() + " " + t("recordCount"));
+        };
+        debounce(search, filter); availability.setOnAction(e -> filter.run()); category.setOnAction(e -> filter.run()); type.setOnAction(e -> filter.run());
+        var selected = gallery.selectedBookProperty();
+        Button edit = button("edit", () -> editor(Store.Entity.BOOKS, selected.get()).showAndWait()); edit.setId("edit"); edit.disableProperty().bind(selected.isNull());
+        Button delete = button("delete", () -> { Store.Row row = selected.get(); if (row != null && confirm("deleteConfirm")) tools.work("delete", () -> { store.delete(Store.Entity.BOOKS, row.number("doc_id")); return true; }, done -> refresh()); }); delete.getStyleClass().add("danger"); delete.disableProperty().bind(selected.isNull());
+        Button history = button("history", () -> historyDialog(Store.Entity.BOOKS, selected.get())); history.disableProperty().bind(selected.isNull());
+        FlowPane actions = new FlowPane(10, 10, edit, delete, history, button("archived", () -> tools.archived(Store.Entity.BOOKS)), count);
+        content.getChildren().addAll(heading, toolbar, gallery, actions, tools.transferButtons(Store.Entity.BOOKS));
+        tasks.submit(() -> {
+            List<Store.Row> books = store.list(Store.Entity.BOOKS); Map<Store.Row, String> index = new HashMap<>(); books.forEach(row -> index.put(row, SearchText.index(row)));
+            return new CatalogData(books, store.choices(Store.Entity.CATEGORIES), store.choices(Store.Entity.TYPES), index);
+        }, data -> {
+            if (request != generation) return;
+            loaded[0] = data; restoringFilters[0] = true; category.getItems().setAll(data.categories()); type.getItems().setAll(data.types());
+            data.categories().stream().filter(row -> Objects.equals(state.category, row.number("cat_id"))).findFirst().ifPresent(category::setValue);
+            data.types().stream().filter(row -> Objects.equals(state.type, row.number("type_id"))).findFirst().ifPresent(type::setValue);
+            restoringFilters[0] = false; filter.run();
+        }, ex -> { if (request == generation) showError(ex); });
     }
 
-    private void loanPage() throws SQLException {
+    Dialog<ButtonType> editor(Store.Entity entity, Store.Row row) { return RecordEditor.create(this, entity, row, id -> refresh()); }
+
+    private void debounce(TextField field, Runnable action) {
+        javafx.animation.PauseTransition delay = new javafx.animation.PauseTransition(javafx.util.Duration.millis(160));
+        Filters state = filters();
+        delay.setOnFinished(e -> action.run());
+        field.textProperty().addListener((o, before, after) -> { state.search = after; delay.playFromStart(); });
+        field.sceneProperty().addListener((o, before, after) -> { if (after == null) delay.stop(); });
+    }
+
+    void showImage(ImageView view, String reference) {
+        Path path = ImageStorage.resolve(reference, store.directory);
+        if (path == null || !Files.isRegularFile(path)) { view.setImage(null); return; }
+        try { Image image = new Image(path.toUri().toString(), 220, 220, true, true); view.setImage(image.isError() ? null : image); }
+        catch (IllegalArgumentException ex) { view.setImage(null); }
+    }
+
+    private void loanPage() {
+        int request = generation; Filters state = filters();
         HBox heading = heading("loans", "loansHint"); Button borrow = button("borrow", this::borrowDialog); borrow.getStyleClass().add("primary"); borrow.setId("borrow"); heading.getChildren().add(borrow);
-        CheckBox history = new CheckBox(t("showHistory")); history.setId("showHistory");
-        TextField search = searchField();
-        TableView<Store.Row> table = loanTable(store.loans(false, null, null)); table.setId("loansTable");
-        Runnable filter = () -> run(() -> {
-            String query = search.getText().strip().toLowerCase(Locale.ROOT);
-            table.getItems().setAll(store.loans(history.isSelected(), null, null).stream().filter(row -> SearchText.matches(row, query)).toList());
-        });
-        history.setOnAction(e -> filter.run()); search.textProperty().addListener((o, a, b) -> filter.run());
-        Button returned = button("return", () -> selected(table, row -> { if (confirm("returnConfirm")) run(() -> { store.returnLoan(row.number("emp_id")); filter.run(); }); }));
-        returned.setId("return"); returned.disableProperty().bind(javafx.beans.binding.Bindings.createBooleanBinding(() -> table.getSelectionModel().getSelectedItem() == null || table.getSelectionModel().getSelectedItem().text("emp_state").equals("0"), table.getSelectionModel().selectedItemProperty()));
-        HBox tools = new HBox(14, search, history, button("refresh", () -> filter.run())); tools.setAlignment(Pos.CENTER_LEFT); HBox.setHgrow(search, Priority.ALWAYS);
-        content.getChildren().addAll(heading, tools, table, returned);
+        CheckBox history = new CheckBox(t("showHistory")); history.setId("showHistory"); history.setSelected(state.history);
+        CheckBox overdue = new CheckBox(t("overdueOnly")); overdue.setId("overdue-only"); overdue.setSelected(state.overdue);
+        TextField search = searchField(); search.setText(state.search);
+        TableView<Store.Row> table = loanTable(List.of()); table.setId("loansTable");
+        var rows = FXCollections.<Store.Row>observableArrayList();
+        Runnable filter = () -> {
+            state.search = search.getText(); state.history = history.isSelected(); state.overdue = overdue.isSelected();
+            table.getItems().setAll(rows.stream().filter(row -> SearchText.matches(row, state.search)
+                    && (state.history || row.text("emp_state").equals("1"))
+                    && (!state.overdue || row.text("emp_state").equals("1") && row.text("return_d").compareTo(LocalDate.now().toString()) < 0)).toList());
+        };
+        Runnable load = () -> tasks.submit(() -> store.loans(true, null, null), result -> { if (request == generation) { rows.setAll(result); filter.run(); } }, ex -> { if (request == generation) showError(ex); });
+        history.setOnAction(e -> filter.run()); overdue.setOnAction(e -> filter.run()); debounce(search, filter);
+        Button returned = button("return", () -> selected(table, row -> { if (confirm("returnConfirm")) tools.work("return", () -> { store.returnLoan(row.number("emp_id")); return true; }, done -> load.run()); })); returned.setId("return");
+        var unavailable = javafx.beans.binding.Bindings.createBooleanBinding(() -> table.getSelectionModel().getSelectedItem() == null || table.getSelectionModel().getSelectedItem().text("emp_state").equals("0"), table.getSelectionModel().selectedItemProperty());
+        returned.disableProperty().bind(unavailable);
+        Button renew = button("renew", () -> selected(table, row -> renewDialog(row, load))); renew.setId("renew"); renew.disableProperty().bind(unavailable);
+        FlowPane toolbar = new FlowPane(10, 10, search, history, overdue, button("refresh", load));
+        FlowPane actions = new FlowPane(10, 10, returned, renew, button("exportVisibleCsv", () -> tools.exportLoans(table.getItems())), button("printOverdue", tools::printOverdue));
+        content.getChildren().addAll(heading, toolbar, table, actions); load.run();
+    }
+
+    private void renewDialog(Store.Row loan, Runnable refreshed) {
+        Dialog<ButtonType> dialog = dialog(t("renew"), true, "loans");
+        LocalDate oldDue = LocalDate.parse(loan.text("return_d")); LocalDate base = oldDue.isAfter(LocalDate.now()) ? oldDue : LocalDate.now();
+        DatePicker due = new DatePicker(base.plusDays(14)); due.setId("renew-due"); due.setEditable(false);
+        Label error = label("", "error-label"); error.setWrapText(true);
+        dialog.getDialogPane().setContent(new VBox(18, label(loan.text("doc_libelle") + " · " + loan.text("student"), "section-title"), formField("dueDate", due, true), error));
+        Button save = (Button) dialog.getDialogPane().lookupButton(dialog.getDialogPane().getButtonTypes().getFirst());
+        save.addEventFilter(javafx.event.ActionEvent.ACTION, e -> {
+            e.consume(); LocalDate value = due.getValue(); dialog.getDialogPane().setDisable(true);
+            tasks.submit(() -> { store.renewLoan(loan.number("emp_id"), value); return true; }, done -> { dialog.getDialogPane().setDisable(false); dialog.close(); refreshed.run(); }, ex -> { dialog.getDialogPane().setDisable(false); error.setText(message(ex)); });
+        }); dialog.showAndWait();
     }
 
     private TableView<Store.Row> loanTable(List<Store.Row> rows) {
         TableView<Store.Row> table = table();
-        column(table, "document", "doc_libelle", 220); column(table, "student", "student", 160); column(table, "cne", "cne", 100);
-        column(table, "borrowDate", "emp_d", 115); column(table, "dueDate", "return_d", 115);
+        column(table, "document", "doc_libelle", 220); column(table, "copy_code", "copy_code", 110); column(table, "student", "student", 160); column(table, "cne", "cne", 100);
+        column(table, "borrowDate", "emp_d", 115); column(table, "dueDate", "return_d", 115); column(table, "returnedAt", row -> row.text("returned_at").replace('T', ' '), 160);
         column(table, "state", row -> t(row.text("emp_state").equals("0") ? "returned" : row.text("return_d").compareTo(LocalDate.now().toString()) < 0 ? "overdue" : "borrowed"), 120);
         table.getItems().setAll(rows); return table;
     }
@@ -495,9 +391,8 @@ public final class PapyrusApp extends Application {
     Dialog<ButtonType> newBorrowDialog() throws SQLException { return newBorrowDialog(null); }
     private Dialog<ButtonType> newBorrowDialog(Integer selectedBook) throws SQLException {
         Dialog<ButtonType> dialog = dialog(t("borrow"), true, "loans");
-        ComboBox<Store.Row> books = new SearchableComboBox<>(store.choices(Store.Entity.BOOKS).stream().filter(row -> row.text("borrowed").equals("0")).toList(), i18n);
-        if (selectedBook != null) books.getItems().stream().filter(row -> row.number("doc_id") == selectedBook).findFirst().ifPresent(books::setValue);
-        ComboBox<Store.Row> students = new SearchableComboBox<>(store.choices(Store.Entity.STUDENTS), i18n);
+        ComboBox<Store.Row> books = new SearchableComboBox<>(List.of(), i18n);
+        ComboBox<Store.Row> students = new SearchableComboBox<>(List.of(), i18n);
         books.setMaxWidth(Double.MAX_VALUE); students.setMaxWidth(Double.MAX_VALUE); books.setId("loan-book"); students.setId("loan-student");
         DatePicker due = new DatePicker(LocalDate.now().plusDays(14)); due.setEditable(false); due.setId("loan-due"); due.setMaxWidth(Double.MAX_VALUE);
         Label error = label("", "error-label"); error.setWrapText(true);
@@ -513,34 +408,41 @@ public final class PapyrusApp extends Application {
         VBox form = new VBox(22, intro, grid, label(t("requiredHint"), "muted"), error); form.setPrefWidth(580); form.setPadding(new Insets(10));
         dialog.getDialogPane().setContent(form);
         Button save = (Button) dialog.getDialogPane().lookupButton(dialog.getDialogPane().getButtonTypes().getFirst());
+        tasks.submit(() -> List.of(store.choices(Store.Entity.BOOKS), store.choices(Store.Entity.STUDENTS)), choices -> {
+            books.getItems().setAll(choices.get(0).stream().filter(row -> row.text("borrowed").equals("0")).toList()); students.getItems().setAll(choices.get(1));
+            if (selectedBook != null) books.getItems().stream().filter(row -> row.number("doc_id") == selectedBook).findFirst().ifPresent(books::setValue);
+        }, ex -> error.setText(message(ex)));
         save.addEventFilter(javafx.event.ActionEvent.ACTION, event -> {
-            try {
-                if (books.getValue() == null || students.getValue() == null) throw new Store.Rule("required");
-                store.borrow(books.getValue().number("doc_id"), students.getValue().number("etud_id"), due.getValue()); refresh();
-            } catch (Exception ex) { event.consume(); error.setText(message(ex)); }
+            event.consume();
+            if (books.getValue() == null || students.getValue() == null) { error.setText(t("required")); return; }
+            int book = books.getValue().number("doc_id"), student = students.getValue().number("etud_id"); LocalDate value = due.getValue();
+            dialog.getDialogPane().setDisable(true);
+            tasks.submit(() -> { store.borrow(book, student, value); return true; }, done -> { dialog.getDialogPane().setDisable(false); dialog.close(); refresh(); }, ex -> { dialog.getDialogPane().setDisable(false); error.setText(message(ex)); });
         });
         return dialog;
     }
     private void borrowDialog() { run(() -> newBorrowDialog().showAndWait()); }
 
     private void historyDialog(Store.Entity entity, Store.Row row) {
-        run(() -> {
-            Dialog<ButtonType> dialog = dialog(t("history"), false);
-            VBox box = new VBox(16, loanTable(store.loans(true, entity, row.number(entity.id)))); box.setPrefWidth(840);
-            if (entity == Store.Entity.STAFF && store.user().admin()) box.getChildren().add(auditTable(store.auditLog(row.number(entity.id))));
-            dialog.getDialogPane().setContent(box); dialog.showAndWait();
-        });
+        Dialog<ButtonType> dialog = dialog(t("history"), false);
+        TableView<Store.Row> loans = loanTable(List.of()); VBox box = new VBox(16, loans); box.setPrefWidth(840); dialog.getDialogPane().setContent(box);
+        tasks.submit(() -> store.loans(true, entity, row.number(entity.id)), rows -> loans.getItems().setAll(rows), this::showError);
+        if (entity == Store.Entity.STAFF && store.user().admin()) tasks.submit(() -> store.auditLog(row.number(entity.id)), rows -> box.getChildren().add(auditTable(rows)), this::showError);
+        dialog.showAndWait();
     }
 
-    private void activityPage() throws SQLException { content.getChildren().addAll(heading("activity", "activityHint"), auditTable(store.auditLog(null))); }
+    private void activityPage() {
+        int request = generation; TableView<Store.Row> table = auditTable(List.of()); content.getChildren().addAll(heading("activity", "activityHint"), table);
+        tasks.submit(() -> store.auditLog(null), rows -> { if (request == generation) table.getItems().setAll(rows); }, ex -> { if (request == generation) showError(ex); });
+    }
     private TableView<Store.Row> auditTable(List<Store.Row> rows) {
         TableView<Store.Row> table = table(); column(table, "date", "date", 210); column(table, "account", "cin", 160); column(table, "action", row -> auditDescription(row.text("info")), 450); table.getItems().setAll(rows); return table;
     }
     private String auditDescription(String info) {
         // Keep legacy free-form audit messages verbatim; translate structured new events.
         String[] parts = info.split(" ", 3);
-        if (parts.length == 1) return switch (info) { case "login" -> t("signIn"); case "logout" -> t("logout"); default -> info; };
-        String verb = switch (parts[0]) { case "create" -> "add"; case "update" -> "edit"; case "delete" -> "delete"; case "borrow" -> "borrow"; case "return" -> "return"; default -> null; };
+        if (parts.length == 1) return switch (info) { case "login" -> t("signIn"); case "logout" -> t("logout"); case "passwordChanged" -> t("passwordChanged"); case "backupRestored" -> t("backupRestored"); default -> info; };
+        String verb = switch (parts[0]) { case "create" -> "add"; case "update" -> "edit"; case "delete" -> "delete"; case "borrow" -> "borrow"; case "return" -> "return"; case "renew" -> "renew"; case "restore" -> "restore"; default -> null; };
         String entity = switch (parts[1]) { case "docs" -> "books"; case "etudiant" -> "students"; case "staff" -> "staff"; case "types" -> "types"; case "categories" -> "categories"; case "emprunts" -> "loans"; default -> null; };
         return verb == null || entity == null ? info : t(verb) + " · " + t(entity) + (parts.length > 2 ? " · " + parts[2].replace("etudiant", t("student")) : "");
     }
@@ -551,7 +453,12 @@ public final class PapyrusApp extends Application {
         TextField path = new TextField(store.directory.toString()); path.setEditable(false); path.setNodeOrientation(NodeOrientation.LEFT_TO_RIGHT);
         Label hint = label(t("storageHint"), "muted"); hint.setWrapText(true);
         VBox storage = new VBox(14, label(t("storage"), "section-title"), path, hint); storage.getStyleClass().add("card");
-        content.getChildren().addAll(appearance, storage, label("Papyrus · " + t("version"), "muted"));
+        content.getChildren().addAll(appearance, storage, button("changePassword", tools::password));
+        if (store.user().admin()) {
+            Label backupHint = label(t("backupHint"), "muted"); backupHint.setWrapText(true);
+            VBox backups = new VBox(14, label(t("backupAndRestore"), "section-title"), backupHint, new HBox(10, button("backup", tools::backup), button("restoreBackup", tools::restoreBackup))); backups.getStyleClass().add("card"); content.getChildren().add(backups);
+        }
+        content.getChildren().add(label("Papyrus · " + t("version"), "muted"));
     }
 
     private HBox heading(String title, String hint) {
@@ -560,26 +467,31 @@ public final class PapyrusApp extends Application {
         HBox box = new HBox(16, text, spacer()); box.setAlignment(Pos.CENTER_LEFT); return box;
     }
     private HBox brand() { HBox box = new HBox(10, icon("brand"), label("Papyrus", "wordmark")); box.setAlignment(Pos.CENTER_LEFT); return box; }
-    private Label label(String text, String style) { Label label = new Label(text); label.getStyleClass().add(style); return label; }
-    private Button button(String key, Runnable action) { Button button = new Button(t(key)); button.setOnAction(e -> action.run()); return button; }
+    Label label(String text, String style) { Label label = new Label(text); label.getStyleClass().add(style); return label; }
+    Button button(String key, Runnable action) { Button button = new Button(t(key)); button.setOnAction(e -> action.run()); return button; }
     private VBox field(String key, Control control) { Label label = label(t(key), "field-label"); label.setLabelFor(control); return new VBox(7, label, control); }
-    private VBox formField(String key, Control control, boolean required) {
+    VBox formField(String key, Control control, boolean required) {
         Label label = label(t(key) + (required ? " *" : ""), "field-label"); label.setLabelFor(control);
         VBox field = new VBox(9, label, control); field.setMinWidth(0); return field;
     }
     private TextField searchField() { TextField field = new TextField(searchValue); field.setPromptText(t("search")); field.setId("search"); field.setAccessibleText(t("search")); return field; }
     private Region spacer() { Region region = new Region(); HBox.setHgrow(region, Priority.ALWAYS); VBox.setVgrow(region, Priority.ALWAYS); return region; }
-    private VBox empty(String hint) { Label label = label(t(hint), "muted"); label.setWrapText(true); VBox box = new VBox(12, icon("books"), label); box.setAlignment(Pos.CENTER); box.setPadding(new Insets(28)); return box; }
-    private TableView<Store.Row> table() { TableView<Store.Row> table = new TableView<>(); table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN); table.setPlaceholder(empty("emptyHint")); table.setPrefHeight(430); VBox.setVgrow(table, Priority.ALWAYS); return table; }
-    private void column(TableView<Store.Row> table, String title, String field, double width) { column(table, title, row -> row.text(field), width); }
-    private void column(TableView<Store.Row> table, String title, java.util.function.Function<Store.Row, String> value, double width) {
+    private VBox empty(String hint) {
+        Label label = label(t(hint), "muted"); label.setWrapText(true);
+        // Virtualized controls measure placeholders before sizing them. Keep Arabic text out of zero-width layout.
+        label.setMinWidth(120); label.setPrefWidth(280);
+        VBox box = new VBox(12, icon("books"), label); box.setAlignment(Pos.CENTER); box.setPadding(new Insets(28)); return box;
+    }
+    TableView<Store.Row> table() { TableView<Store.Row> table = new TableView<>(); table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN); table.setPlaceholder(empty("emptyHint")); table.setPrefHeight(430); VBox.setVgrow(table, Priority.ALWAYS); return table; }
+    void column(TableView<Store.Row> table, String title, String field, double width) { column(table, title, row -> row.text(field), width); }
+    void column(TableView<Store.Row> table, String title, java.util.function.Function<Store.Row, String> value, double width) {
         TableColumn<Store.Row, String> column = new TableColumn<>(t(title)); column.setCellValueFactory(cell -> new ReadOnlyStringWrapper(value.apply(cell.getValue()))); column.setPrefWidth(width); table.getColumns().add(column);
     }
     private void selected(TableView<Store.Row> table, Consumer<Store.Row> action) { Store.Row row = table.getSelectionModel().getSelectedItem(); if (row != null) action.accept(row); }
-    private Dialog<ButtonType> dialog(String title, boolean save) {
+    Dialog<ButtonType> dialog(String title, boolean save) {
         return dialog(title, save, page);
     }
-    private Dialog<ButtonType> dialog(String title, boolean save, String icon) {
+    Dialog<ButtonType> dialog(String title, boolean save, String icon) {
         Dialog<ButtonType> dialog = new Dialog<>(); dialog.initOwner(stage); dialog.setTitle(title); dialog.setResizable(true);
         dialog.getDialogPane().getButtonTypes().add(new ButtonType(t(save ? "save" : "close"), ButtonBar.ButtonData.OK_DONE));
         if (save) dialog.getDialogPane().getButtonTypes().add(new ButtonType(t("cancel"), ButtonBar.ButtonData.CANCEL_CLOSE));
@@ -594,26 +506,34 @@ public final class PapyrusApp extends Application {
         setIcon.run();
         apply(dialog.getDialogPane()); return dialog;
     }
-    private boolean confirm(String key) {
+    boolean confirm(String key) {
         ButtonType yes = new ButtonType(t("ok"), ButtonBar.ButtonData.OK_DONE);
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION, t(key), yes, new ButtonType(t("cancel"), ButtonBar.ButtonData.CANCEL_CLOSE));
         alert.initOwner(stage); alert.setTitle(t("confirm")); alert.setHeaderText(null); apply(alert.getDialogPane());
         return alert.showAndWait().orElse(ButtonType.CANCEL) == yes;
     }
-    private void refresh() { try { renderPage(); } catch (Exception ex) { showError(ex); } }
+    void refresh() { try { renderPage(); } catch (Exception ex) { showError(ex); } }
     @FunctionalInterface private interface Checked { void run() throws Exception; }
     private void run(Checked action) { try { action.run(); } catch (Exception ex) { showError(ex); } }
-    private String message(Exception ex) {
+    String message(Exception ex) {
+        if (ex instanceof Store.ImportFailure failure) return t("importRecordError") + " " + failure.record + ": " + message((Exception) failure.getCause());
         if (ex instanceof Store.Rule rule) return t(rule.key);
         if (ex instanceof SQLException sql && sql.getErrorCode() == 19) return t("duplicate");
-        ex.printStackTrace(); return t("databaseError");
+        ex.printStackTrace();
+        if (ex instanceof IOException) return t("fileError") + "\n" + Objects.toString(ex.getMessage(), "");
+        return t("databaseError");
     }
-    private void showError(Exception ex) {
+    void inform(String title, String details) {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION, details.isBlank() ? t(title) : details, new ButtonType(t("close"), ButtonBar.ButtonData.OK_DONE));
+        alert.initOwner(stage); alert.setTitle(t(title)); alert.setHeaderText(t(title)); alert.getDialogPane().setId("notification"); apply(alert.getDialogPane()); alert.show();
+    }
+    void showError(Exception ex) {
+        if (store != null && store.user() == null && !(ex instanceof IOException)) showLogin();
         Alert alert = new Alert(Alert.AlertType.ERROR, message(ex), new ButtonType(t("ok"), ButtonBar.ButtonData.OK_DONE));
-        alert.initOwner(stage); alert.setTitle(t("error")); alert.setHeaderText(null); apply(alert.getDialogPane()); alert.showAndWait();
+        alert.initOwner(stage); alert.setTitle(t("error")); alert.setHeaderText(null); apply(alert.getDialogPane()); alert.show();
     }
 
-    private Node icon(String name) {
+    Node icon(String name) {
         String path = switch (name) {
             case "brand" -> "M3 15 Q7 13 12 17 Q17 13 21 15 V21 Q17 19 12 23 Q7 19 3 21 Z M12 17 C6 12 6 6 8 2 C15 3 18 9 12 17 Z M12 17 L10 6";
             case "books" -> "M3 4 Q8 2 12 5 Q16 2 21 4 L21 20 Q16 18 12 21 Q8 18 3 20 Z M12 5 L12 21";
