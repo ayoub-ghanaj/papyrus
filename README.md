@@ -52,7 +52,7 @@ You can also close Papyrus and copy the **entire folder**. Imported image refere
 
 The original application's tables and IDs are retained. Before using an old database, back up its database **and original image files**. You can copy `test1.db` into the default data folder, or launch from the original project folder containing `database/test1.db`; Papyrus recognizes that legacy location. For a custom location, pass `-Dpapyrus.dataDir=/absolute/data/folder` to Java when running from source.
 
-Opening a 1.0.x library in 1.1.0 first creates `test1.pre-1.1.0.db`, then adds metadata, session versions, return/renewal fields, and indexes in a transaction. IDs and history are retained. These automatic migration snapshots contain the database only. Keep a full backup including images and use Papyrus 1.1.0 or later after migration.
+Close all running Papyrus windows before upgrading. Opening a 1.0.x library in 1.1.0 first creates `test1.pre-1.1.0.db`, then adds metadata, session versions, return/renewal fields, and indexes in a transaction. IDs and history are retained. These automatic migration snapshots contain the database only. Keep a full backup including images and use Papyrus 1.1.0 or later after migration.
 
 The first opening of a legacy database creates `test1.pre-1.0.0.db` as a database-only backup before initializing missing tables or upgrading passwords. Old cleartext passwords are upgraded to salted PBKDF2 hashes on successful login. Keep image files at their existing locations, or reselect them in the editor to import a copy into the new data folder. The original repository's `resources/img/` is retained for legacy file references and is not bundled into installers.
 

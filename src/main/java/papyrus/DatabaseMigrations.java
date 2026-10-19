@@ -11,6 +11,7 @@ final class DatabaseMigrations {
     static void migrate(Connection connection, Path directory, boolean existing) throws SQLException, IOException {
         int version;
         try (Statement sql = connection.createStatement(); ResultSet result = sql.executeQuery("PRAGMA user_version")) {
+            if (!result.next()) throw new SQLException("Missing database schema version");
             version = result.getInt(1);
         }
         if (version > VERSION) throw new SQLException("Database was created by a newer Papyrus version");

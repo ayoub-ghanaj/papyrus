@@ -23,6 +23,7 @@ public final class UiSmoke {
     private static final Path SCREENSHOTS = Path.of("target", "screenshots");
 
     public static void main(String[] args) throws Exception {
+        UiTestSupport.start();
         data = Files.createTempDirectory("papyrus-ui-smoke-");
         System.setProperty("papyrus.dataDir", data.toString());
         Files.createDirectories(SCREENSHOTS);
@@ -123,6 +124,7 @@ public final class UiSmoke {
                 add(() -> app.theme(dark));
                 for (String page : List.of("dashboard", "books", "students", "loans", "types", "categories", "staff", "activity", "settings")) {
                     add(() -> {
+                        UiTestSupport.progress(language + " / " + dark + " / " + page);
                         app.navigate(page);
                         check(stage.getScene().getRoot().getNodeOrientation() == (language.equals("ar") ? javafx.geometry.NodeOrientation.RIGHT_TO_LEFT : javafx.geometry.NodeOrientation.LEFT_TO_RIGHT), "Screen direction");
                         if (language.equals("ar") && dark && List.of("dashboard", "loans", "settings").contains(page)) screenshot(page + "-ar-dark");
@@ -178,7 +180,8 @@ public final class UiSmoke {
             long deadline;
             @Override public void run() {
                 if (deadline == 0) deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(15);
-                if (condition.getAsBoolean()) return;
+                UiTestSupport.step = message;
+                if (condition.getAsBoolean()) { UiTestSupport.progress(message); return; }
                 check(System.nanoTime() < deadline, message);
                 ((ArrayDeque<Runnable>) STEPS).addFirst(this);
             }
@@ -206,6 +209,7 @@ public final class UiSmoke {
     }
     private static void screenshot(String name, Node root) {
         try {
+            UiTestSupport.progress("screenshot " + name);
             root.applyCss(); ((javafx.scene.Parent) root).layout();
             WritableImage image = root.snapshot(null, null);
             saveImage(name, image);

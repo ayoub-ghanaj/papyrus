@@ -55,6 +55,7 @@ jobs:
         if: runner.os == 'Windows'
         run: .\mvnw.cmd -B -ntp clean verify
       - name: Exercise desktop UI (Linux)
+        timeout-minutes: 8
         if: runner.os == 'Linux'
         run: |
           xvfb-run -a -s '-screen 0 1920x1080x24' java --enable-native-access=ALL-UNNAMED -Dpapyrus.smoke.skipWindowManager=true -cp 'target/test-classes:target/classes:target/lib/*' papyrus.UiSmoke

@@ -16,6 +16,7 @@ public final class UiReliabilitySmoke {
     static PapyrusApp app; static Stage stage; static Dialog<ButtonType> editor; static DialogPane toolPane;
     static final ArrayDeque<Runnable> steps = new ArrayDeque<>();
     public static void main(String[] args) throws Exception {
+        UiTestSupport.start();
         Path data=Files.createTempDirectory("papyrus-ui-reliability-");System.setProperty("papyrus.dataDir",data.toString());
         try(Store store=new Store(data)) {
             store.setup("review","Review user","review-password");store.login("review","review-password");
@@ -43,6 +44,9 @@ public final class UiReliabilitySmoke {
                     await(()->gallery().getItems().stream().mapToInt(List::size).sum()==1,"Filter survives refresh");
                     steps.add(()->check(((TextField)stage.getScene().lookup("#search")).getText().equals("COPY-600"),"Search text retained"));
                 }
+                steps.add(()->{((TextField)stage.getScene().lookup("#search")).setText("COPY-599");app.refresh();});
+                await(()->gallery().getItems().stream().mapToInt(List::size).sum()==1,"Search survives refresh before debounce finishes");
+                steps.add(()->check(((TextField)stage.getScene().lookup("#search")).getText().equals("COPY-599"),"Latest keystroke retained"));
                 steps.add(()->{try{editor=app.editor(Store.Entity.BOOKS,app.store.list(Store.Entity.BOOKS).getFirst());editor.show();}catch(Exception e){throw new RuntimeException(e);}});
                 await(()->((ComboBox<?>)editor.getDialogPane().lookup("#field-cat_id")).getValue()!=null,"Editor choices loaded");
                 steps.add(()->Platform.runLater(()->((Button)editor.getDialogPane().lookup("#quick-add-cat_id")).fire()));
@@ -91,7 +95,7 @@ public final class UiReliabilitySmoke {
     }
     static BookGallery gallery(){return (BookGallery)stage.getScene().lookup("#book-gallery");}
     static void await(BooleanSupplier condition,String message) {
-        steps.add(new Runnable(){long deadline;public void run(){if(deadline==0)deadline=System.nanoTime()+15_000_000_000L;if(condition.getAsBoolean())return;check(System.nanoTime()<deadline,message);steps.addFirst(this);}});
+        steps.add(new Runnable(){long deadline;public void run(){if(deadline==0)deadline=System.nanoTime()+15_000_000_000L;UiTestSupport.step=message;if(condition.getAsBoolean()){UiTestSupport.progress(message);return;}check(System.nanoTime()<deadline,message);steps.addFirst(this);}});
     }
     static void advance(){try{if(steps.isEmpty())return;steps.remove().run();PauseTransition wait=new PauseTransition(Duration.millis(200));wait.setOnFinished(e->advance());wait.play();}catch(Throwable e){e.printStackTrace();System.exit(1);}}
     static void check(boolean value,String message){if(!value)throw new AssertionError(message);}

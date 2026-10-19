@@ -329,7 +329,9 @@ public final class PapyrusApp extends Application {
 
     private void debounce(TextField field, Runnable action) {
         javafx.animation.PauseTransition delay = new javafx.animation.PauseTransition(javafx.util.Duration.millis(160));
-        delay.setOnFinished(e -> action.run()); field.textProperty().addListener((o, before, after) -> delay.playFromStart());
+        Filters state = filters();
+        delay.setOnFinished(e -> action.run());
+        field.textProperty().addListener((o, before, after) -> { state.search = after; delay.playFromStart(); });
         field.sceneProperty().addListener((o, before, after) -> { if (after == null) delay.stop(); });
     }
 
@@ -380,8 +382,8 @@ public final class PapyrusApp extends Application {
 
     private TableView<Store.Row> loanTable(List<Store.Row> rows) {
         TableView<Store.Row> table = table();
-        column(table, "document", "doc_libelle", 220); column(table, "student", "student", 160); column(table, "cne", "cne", 100);
-        column(table, "borrowDate", "emp_d", 115); column(table, "dueDate", "return_d", 115); column(table, "returnedAt", "returned_at", 160);
+        column(table, "document", "doc_libelle", 220); column(table, "copy_code", "copy_code", 110); column(table, "student", "student", 160); column(table, "cne", "cne", 100);
+        column(table, "borrowDate", "emp_d", 115); column(table, "dueDate", "return_d", 115); column(table, "returnedAt", row -> row.text("returned_at").replace('T', ' '), 160);
         column(table, "state", row -> t(row.text("emp_state").equals("0") ? "returned" : row.text("return_d").compareTo(LocalDate.now().toString()) < 0 ? "overdue" : "borrowed"), 120);
         table.getItems().setAll(rows); return table;
     }
@@ -474,7 +476,12 @@ public final class PapyrusApp extends Application {
     }
     private TextField searchField() { TextField field = new TextField(searchValue); field.setPromptText(t("search")); field.setId("search"); field.setAccessibleText(t("search")); return field; }
     private Region spacer() { Region region = new Region(); HBox.setHgrow(region, Priority.ALWAYS); VBox.setVgrow(region, Priority.ALWAYS); return region; }
-    private VBox empty(String hint) { Label label = label(t(hint), "muted"); label.setWrapText(true); VBox box = new VBox(12, icon("books"), label); box.setAlignment(Pos.CENTER); box.setPadding(new Insets(28)); return box; }
+    private VBox empty(String hint) {
+        Label label = label(t(hint), "muted"); label.setWrapText(true);
+        // Virtualized controls measure placeholders before sizing them. Keep Arabic text out of zero-width layout.
+        label.setMinWidth(120); label.setPrefWidth(280);
+        VBox box = new VBox(12, icon("books"), label); box.setAlignment(Pos.CENTER); box.setPadding(new Insets(28)); return box;
+    }
     TableView<Store.Row> table() { TableView<Store.Row> table = new TableView<>(); table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN); table.setPlaceholder(empty("emptyHint")); table.setPrefHeight(430); VBox.setVgrow(table, Priority.ALWAYS); return table; }
     void column(TableView<Store.Row> table, String title, String field, double width) { column(table, title, row -> row.text(field), width); }
     void column(TableView<Store.Row> table, String title, java.util.function.Function<Store.Row, String> value, double width) {
