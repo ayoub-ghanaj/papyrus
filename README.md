@@ -15,7 +15,7 @@ Download the Windows or Linux x64 package from [Releases](https://github.com/ayo
 | System | Installer | Portable version |
 | --- | --- | --- |
 | Windows 10/11 x64 | Run the `.exe`; choose the installation folder and shortcuts. | Extract the ZIP and open `Papyrus/Papyrus.exe`. |
-| Ubuntu/Debian x64 | Install the `.deb` with your package manager, or `sudo apt install ./Papyrus-1.0.0-linux-x64.deb`. | Extract the `.tar.gz` and run `Papyrus/bin/Papyrus`. GTK 3 and a graphical desktop are required. |
+| Ubuntu/Debian x64 | Install the `.deb` with your package manager, or `sudo apt install ./Papyrus-1.0.1-linux-x64.deb`. | Extract the `.tar.gz` and run `Papyrus/bin/Papyrus`. GTK 3 and a graphical desktop are required. |
 
 On first launch, create an administrator account. There is no default password. Existing installations keep their existing sign-in details.
 
@@ -52,14 +52,14 @@ The first opening of a legacy database creates `test1.pre-1.0.0.db` as a databas
 
 ## Build and run
 
-Install JDK 25. The Maven wrapper downloads Maven 3.9.16 on first use.
+Install JDK 25. The Maven wrapper downloads Maven 3.10.0 on first use.
 
 ```sh
 ./mvnw clean verify
 ./mvnw javafx:run
 ```
 
-On Windows, use `mvnw.cmd` in place of `./mvnw`. The build pins JavaFX 25.0.4 and SQLite JDBC 3.53.4.0. IDEs can import `pom.xml` directly.
+On Windows, use `mvnw.cmd` in place of `./mvnw`. The build pins JavaFX 27 and SQLite JDBC 3.53.4.0. IDEs can import `pom.xml` directly.
 
 The test suite checks persistence, legacy password upgrades, Unicode and apostrophes, permission boundaries, loan availability, audit attribution, and translation coverage. To exercise the actual UI on a graphical desktop after building:
 
