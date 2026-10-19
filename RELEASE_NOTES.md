@@ -1,15 +1,18 @@
-Papyrus 1.0.1 updates the application dependencies and release tooling.
+Papyrus 1.1.0 adds recovery tools and improves library workflows and responsiveness.
 
-- JavaFX 27 and SLF4J 2.0.20.
-- JUnit 6.1.3 and Maven 3.10.0, with updated clean, resources, compiler, test, JAR, and dependency plugins.
-- Updated GitHub Actions, pinned to verified commit hashes.
-- Packaged artifacts are downloaded again in CI and checked against their SHA-256 lists.
-- Dependabot groups Maven and GitHub Actions updates to reduce separate update PRs.
+- Account deletion, role changes, and password changes revoke existing sessions. Failed sign-ins leave no authenticated session.
+- Back up accounts, records, and images to a verified ZIP. Restore keeps a recovery backup first and requires other windows using the library to be closed.
+- Imported images use portable paths. Existing managed images can be recovered after moving a library folder.
+- Restore archived records with their original identifiers and history.
+- Record authors, ISBNs, shelf locations, and unique copy/barcode identifiers. Add categories and types from document forms.
+- Renew loans, record actual return timestamps, filter overdue loans, export the visible list, and print overdue reports.
+- Import documents and students from UTF-8 CSV with preview and all-or-nothing validation. Export active records or download a template.
+- Change your own password from Settings.
+- Database work runs in the background. Indexed loan queries, debounced searches, and reusable gallery rows keep larger catalogs responsive.
+- Navigation scrolls on small windows while account controls remain visible. Editing preserves search/filter state and detects conflicting edits.
+- English, French, Arabic, light, and dark interfaces include the new workflows.
+- CI checks release versions and exercises native installation, upgrade from 1.0.0, migration, and uninstall data preservation on Windows and Linux.
 
-SQLite JDBC remains at 3.53.4.0, the current stable release checked for this update. This patch does not change the database schema or user workflows.
+Existing databases are migrated without changing record IDs. Before upgrading a 1.0.x database, Papyrus keeps `test1.pre-1.1.0.db`; this snapshot contains the database only. Keep your own full backup of the library folder and original images as well. After opening a migrated library, use Papyrus 1.1.0 or later.
 
-Windows: run `Papyrus-1.0.1-windows-x64.exe`, or extract the portable ZIP and open `Papyrus/Papyrus.exe`.
-
-Ubuntu/Debian: install the `.deb` using your package manager. For the portable Linux archive, extract it and run `Papyrus/bin/Papyrus`. A graphical desktop with GTK 3 is required.
-
-Both platforms include the Java runtime. Packages are unsigned; check the accompanying SHA-256 checksum list. Existing accounts, records, images, and preferences remain in their data folder.
+Windows: use the EXE installer or extract the portable ZIP. Ubuntu/Debian: install the DEB or extract the portable archive. Java is bundled. Packages are unsigned; verify the supplied SHA-256 checksums.
